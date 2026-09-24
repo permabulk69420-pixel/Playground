@@ -1,9 +1,8 @@
 import * as THREE from 'three';
 
-// Charging aura: each hand glows like a held light and leaves a wide, soft
-// ribbon of light along its real path, and a shimmering veil of golden energy
-// flows upward around the caster's body. The veil is brightest at its edges
-// (fresnel), so looking straight through it never blocks the view.
+// Charging aura: each hand glows like a held light, with light trails swirling
+// around it and following its movement; a large magic circle opens on the
+// floor beneath the caster with light rising from its rim, and flashes on release.
 const NOISE = `
 float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p){
@@ -25,55 +24,6 @@ function glowTexture() {
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, 128, 128);
   return new THREE.CanvasTexture(canvas);
-}
-
-function createVeil(scene) {
-  const uniforms = { time: { value: 0 }, strength: { value: 0 } };
-  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 0.8, 1, 64, 1, true), new THREE.ShaderMaterial({
-    uniforms, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    vertexShader: `
-      varying vec3 vWorld; varying vec3 vNormal; varying vec2 vUv;
-      void main() {
-        vUv = uv;
-        vec4 world = modelMatrix * vec4(position, 1.);
-        vWorld = world.xyz;
-        vNormal = normalize(mat3(modelMatrix) * normal);
-        gl_Position = projectionMatrix * viewMatrix * world;
-      }`,
-    fragmentShader: `${NOISE}
-      uniform float time; uniform float strength;
-      varying vec3 vWorld; varying vec3 vNormal; varying vec2 vUv;
-      void main() {
-        vec3 view = normalize(cameraPosition - vWorld);
-        float edge = pow(1. - abs(dot(normalize(vNormal), view)), 2.2);
-        // Flowing energy rising up the veil, with bright streaks that shimmer.
-        vec2 flow = vec2(vUv.x * 14., vUv.y * 3. - time * 1.1);
-        float n = fbm(flow + fbm(flow * .7 + time * .3) * 1.5);
-        float streaks = pow(fbm(vec2(vUv.x * 40., vUv.y * 1.2 - time * 2.2)), 3.) * 2.5;
-        float vertical = smoothstep(0., .18, vUv.y) * (1. - smoothstep(.62, 1., vUv.y));
-        float a = (edge * (.45 + n * 1.3) + streaks * .7 * (.5 + edge)) * vertical * strength;
-        if (a < .003) discard;
-        vec3 color = mix(vec3(1., .45, .08), vec3(1., .85, .5), clamp(n * 1.2 + streaks * .3, 0., 1.));
-        gl_FragColor = vec4(color, a);
-        #include <colorspace_fragment>
-      }`
-  }));
-  mesh.name = 'aura-veil';
-  mesh.frustumCulled = false;
-  mesh.visible = false;
-  scene.add(mesh);
-  return {
-    update(head, time, strength) {
-      mesh.visible = strength > 0.01;
-      if (!mesh.visible) return;
-      const height = Math.max(0.8, head.y + 0.35);
-      mesh.scale.set(1, height, 1);
-      mesh.position.set(head.x, height / 2, head.z);
-      uniforms.time.value = time;
-      uniforms.strength.value = strength;
-    },
-    hide() { mesh.visible = false; }
-  };
 }
 
 // Wide soft ribbon of light through the last half second of one hand's path.
@@ -330,9 +280,67 @@ function createHandOrbits(scene, count) {
   return { update, orbits, hide() { mesh.visible = false; } };
 }
 
+
+// Large magic circle on the floor under the caster: concentric rings, a band
+// of runes and a hexagram, counter-rotating and brightening with charge.
+function createSigil(scene) {
+  const uniforms = { time: { value: 0 }, strength: { value: 0 }, flash: { value: 0 } };
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShaderMaterial({
+    uniforms, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
+    fragmentShader: `
+      uniform float time; uniform float strength; uniform float flash; varying vec2 vUv;
+      float ring(float r, float at, float w){ return exp(-pow((r - at) / w, 2.)); }
+      float segment(vec2 p, vec2 a, vec2 b, float w){
+        vec2 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.);
+        return exp(-pow(length(pa - ba * h) / w, 2.));
+      }
+      vec2 rot(vec2 p, float a){ float c = cos(a), s = sin(a); return vec2(c * p.x - s * p.y, s * p.x + c * p.y); }
+      void main(){
+        vec2 p = vUv * 2. - 1.; float r = length(p);
+        if (r > 1.) discard;
+        float lines = ring(r, .96, .008) + ring(r, .9, .006) + ring(r, .62, .007) + ring(r, .57, .005) + ring(r, .22, .006);
+        // Rune band: glyph-like ticks of varying length, turning one way.
+        vec2 q = rot(p, time * .25); float a = atan(q.y, q.x) / 6.2832 + .5;
+        float cell = floor(a * 48.), f = fract(a * 48.);
+        float glyph = step(.3, fract(sin(cell * 91.7) * 437.5)) * step(.25, f) * step(f, .75);
+        float runes = glyph * smoothstep(.905, .915, r) * (1. - smoothstep(.945, .955, r));
+        // Hexagram turning the other way.
+        vec2 h = rot(p, -time * .4); float star = 0.;
+        for (int i = 0; i < 6; i++) {
+          float t0 = float(i) * 2.0944, t1 = t0 + 2.0944 * 2.;
+          star += segment(h, .57 * vec2(cos(t0), sin(t0)), .57 * vec2(cos(t1), sin(t1)), .006);
+        }
+        float glow = exp(-r * r * 3.) * .12;
+        float pulse = .85 + .15 * sin(time * 4.);
+        float alpha = (lines * .9 + runes * .8 + star * .7 + glow) * strength * pulse + flash * (lines + star) * 1.5;
+        if (alpha < .004) discard;
+        vec3 color = mix(vec3(1., .5, .12), vec3(1., .9, .6), clamp(lines + runes, 0., 1.));
+        gl_FragColor = vec4(color, alpha);
+        #include <colorspace_fragment>
+      }`
+  }));
+  mesh.name = 'aura-sigil';
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.frustumCulled = false;
+  mesh.visible = false;
+  scene.add(mesh);
+  return {
+    update(head, time, strength, power, flash) {
+      mesh.visible = strength > 0.01 || flash > 0.01;
+      if (!mesh.visible) return;
+      mesh.position.set(head.x, 0.012, head.z);
+      mesh.scale.setScalar(2.2 + power * 0.8);
+      uniforms.time.value = time; uniforms.strength.value = strength; uniforms.flash.value = flash;
+    },
+    hide() { mesh.visible = false; }
+  };
+}
+
 export function createEnergyStreaks(scene) {
   const texture = glowTexture();
-  const veil = createVeil(scene);
+  const sigil = createSigil(scene);
+  let flash = 0, lastPower = 0;
   const trails = [createHandTrail(scene), createHandTrail(scene)];
   const orbits = [createHandOrbits(scene, 6), createHandOrbits(scene, 6)];
   const sparkles = createSparkles(scene, 400);
@@ -355,7 +363,9 @@ export function createEnergyStreaks(scene) {
 
   function update(active, power, palms, head, facing, now, dt) {
     strength = THREE.MathUtils.lerp(strength, active ? 0.55 + 0.45 * power : 0, 1 - Math.exp(-dt * (active ? 6 : 4)));
-    veil.update(head, now, strength * 1.6);
+    if (active) lastPower = power;
+    flash = Math.max(0, flash - dt * 2.5);
+    sigil.update(head, now, strength, lastPower, flash);
     for (let side = 0; side < 2; side++) {
       trails[side].update(active, palms[side], now, strength);
       orbits[side].update(palms[side], palms[1 - side], now, dt, strength);
@@ -373,9 +383,9 @@ export function createEnergyStreaks(scene) {
       flareRate += dt * (35 + power * 45);
       while (flareRate >= 1) {
         flareRate--;
-        const angle = Math.random() * Math.PI * 2, radius = 0.5 + Math.random() * 0.7;
-        p.set(head.x + Math.cos(angle) * radius, 0.2 + Math.random() * (head.y + 0.2), head.z + Math.sin(angle) * radius);
-        v.set(0, 0.08, 0);
+        const angle = Math.random() * Math.PI * 2, radius = (1.1 + lastPower * 0.4) * (0.95 + Math.random() * 0.08);
+        p.set(head.x + Math.cos(angle) * radius, 0.03, head.z + Math.sin(angle) * radius);
+        v.set(0, 0.6 + Math.random() * 0.8, 0);
         sparkles.emit(p, v, 0.6 + Math.random() * 0.5, 0.14 + Math.random() * 0.14, 8 + Math.random() * 8);
       }
     }
@@ -384,9 +394,9 @@ export function createEnergyStreaks(scene) {
     light.intensity = strength * 2.5;
   }
 
-  function release() {}
+  function release() { flash = 1; }
   function reset() {
-    strength = 0; veil.hide(); light.intensity = 0;
+    strength = 0; flash = 0; sigil.hide(); light.intensity = 0;
     for (const t of trails) t.reset();
     for (const o of orbits) o.hide();
     sparkles.reset(); flareRate = 0;
