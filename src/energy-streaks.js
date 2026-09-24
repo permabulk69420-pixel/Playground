@@ -51,7 +51,7 @@ function createVeil(scene) {
         float n = fbm(flow + fbm(flow * .7 + time * .3) * 1.5);
         float streaks = pow(fbm(vec2(vUv.x * 40., vUv.y * 1.2 - time * 2.2)), 3.) * 2.5;
         float vertical = smoothstep(0., .18, vUv.y) * (1. - smoothstep(.62, 1., vUv.y));
-        float a = (edge * (.25 + n * .9) + streaks * .35 * (.4 + edge)) * vertical * strength;
+        float a = (edge * (.45 + n * 1.3) + streaks * .7 * (.5 + edge)) * vertical * strength;
         if (a < .003) discard;
         vec3 color = mix(vec3(1., .45, .08), vec3(1., .85, .5), clamp(n * 1.2 + streaks * .3, 0., 1.));
         gl_FragColor = vec4(color, a);
@@ -152,7 +152,7 @@ function createHandTrail(scene) {
         const v = j * 2 + s;
         a.toArray(positions, v * 3); dir.toArray(tangents, v * 3);
         shades.set([color.r, color.g, color.b, fade], v * 4);
-        widths[v] = 0.06 * (1 - age * 0.6);
+        widths[v] = 0.09 * (1 - age * 0.6);
       }
     }
     for (const name of ['position', 'normal', 'shade', 'width']) geo.attributes[name].needsUpdate = true;
@@ -321,7 +321,7 @@ function createHandOrbits(scene, count) {
           const v = (i * samples + j) * 2 + s;
           point.toArray(positions, v * 3); dir.toArray(tangents, v * 3);
           shades.set([color.r, color.g, color.b, fade], v * 4);
-          widths[v] = 0.022 * (1 - t * 0.75) * (0.7 + 0.3 * strength);
+          widths[v] = 0.03 * (1 - t * 0.7) * (0.7 + 0.3 * strength);
         }
       }
     }
@@ -334,7 +334,7 @@ export function createEnergyStreaks(scene) {
   const texture = glowTexture();
   const veil = createVeil(scene);
   const trails = [createHandTrail(scene), createHandTrail(scene)];
-  const orbits = [createHandOrbits(scene, 4), createHandOrbits(scene, 4)];
+  const orbits = [createHandOrbits(scene, 6), createHandOrbits(scene, 6)];
   const sparkles = createSparkles(scene, 400);
   const p = new THREE.Vector3(), v = new THREE.Vector3();
   let flareRate = 0;
@@ -355,7 +355,7 @@ export function createEnergyStreaks(scene) {
 
   function update(active, power, palms, head, facing, now, dt) {
     strength = THREE.MathUtils.lerp(strength, active ? 0.55 + 0.45 * power : 0, 1 - Math.exp(-dt * (active ? 6 : 4)));
-    veil.update(head, now, strength * 1.3);
+    veil.update(head, now, strength * 1.6);
     for (let side = 0; side < 2; side++) {
       trails[side].update(active, palms[side], now, strength);
       orbits[side].update(palms[side], palms[1 - side], now, dt, strength);
@@ -363,20 +363,20 @@ export function createEnergyStreaks(scene) {
       const { core, halo } = glows[side];
       core.visible = halo.visible = strength > 0.01;
       core.position.copy(palms[side]); halo.position.copy(palms[side]);
-      core.scale.setScalar(0.07 * pulse * (0.7 + 0.3 * power));
-      halo.scale.setScalar(0.28 * pulse * (0.7 + 0.5 * power));
+      core.scale.setScalar(0.1 * pulse * (0.7 + 0.3 * power));
+      halo.scale.setScalar(0.45 * pulse * (0.7 + 0.5 * power));
       core.material.opacity = strength;
       halo.material.opacity = strength * 0.55;
     }
     // Big flashing star flares out around the body.
     if (active) {
-      flareRate += dt * (14 + power * 22);
+      flareRate += dt * (35 + power * 45);
       while (flareRate >= 1) {
         flareRate--;
         const angle = Math.random() * Math.PI * 2, radius = 0.5 + Math.random() * 0.7;
         p.set(head.x + Math.cos(angle) * radius, 0.2 + Math.random() * (head.y + 0.2), head.z + Math.sin(angle) * radius);
         v.set(0, 0.08, 0);
-        sparkles.emit(p, v, 0.6 + Math.random() * 0.5, 0.1 + Math.random() * 0.1, 8 + Math.random() * 8);
+        sparkles.emit(p, v, 0.6 + Math.random() * 0.5, 0.14 + Math.random() * 0.14, 8 + Math.random() * 8);
       }
     }
     sparkles.update(dt, now);
