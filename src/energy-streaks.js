@@ -83,7 +83,7 @@ function createSparkles(scene, count) {
 
 // Ribbon of light through the last ~0.4 s of one hand's path.
 function createHandTrail(scene) {
-  const maxPoints = 48, subdiv = 3, samples = (maxPoints - 1) * subdiv + 1, LIFE = 0.42;
+  const maxPoints = 64, subdiv = 3, samples = (maxPoints - 1) * subdiv + 1, LIFE = 0.6;
   const points = Array.from({ length: maxPoints }, () => ({ p: new THREE.Vector3(), t: 0 }));
   let used = 0;
   const vertices = samples * 2;
@@ -128,7 +128,7 @@ function createHandTrail(scene) {
   mesh.frustumCulled = false;
   scene.add(mesh);
 
-  const hot = new THREE.Color(0xfff6e0), gold = new THREE.Color(0xffc24a), rose = new THREE.Color(0xff6a3a);
+  const hot = new THREE.Color(0xfff8e8), gold = new THREE.Color(0xffc24a), rose = new THREE.Color(0xff5fa8);
   const color = new THREE.Color(), a = new THREE.Vector3(), dir = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
   const curve = new THREE.CatmullRomCurve3([], false, 'centripetal');
 
@@ -158,7 +158,7 @@ function createHandTrail(scene) {
         const v = j * 2 + s;
         a.toArray(positions, v * 3); dir.toArray(tangents, v * 3);
         shades.set([color.r, color.g, color.b, fade], v * 4);
-        widths[v] = 0.022 * (1 - age * 0.8) * (0.7 + 0.3 * strength);
+        widths[v] = 0.034 * (1 - age * 0.75) * (0.7 + 0.3 * strength);
       }
     }
     for (const name of ['position', 'normal', 'shade', 'width']) geo.attributes[name].needsUpdate = true;
@@ -168,16 +168,67 @@ function createHandTrail(scene) {
   return { update, reset };
 }
 
+
+// Glowing rune circle that spins at a palm, facing the other hand.
+function createHandCircle(scene) {
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShaderMaterial({
+    uniforms: { time: { value: 0 }, strength: { value: 0 }, spin: { value: 1 } },
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
+    fragmentShader: `
+      uniform float time; uniform float strength; uniform float spin; varying vec2 vUv;
+      float band(float r, float at, float w){ return exp(-pow((r - at) / w, 2.)); }
+      void main(){
+        vec2 p = vUv * 2. - 1.; float r = length(p); float a = atan(p.y, p.x);
+        float outer = band(r, .92, .018) + band(r, .8, .012);
+        float inner = band(r, .5, .015);
+        // Rune ticks between the outer rings, rotating one way; spokes the other.
+        float ticks = step(.55, fract((a + time * .8 * spin) / 6.2832 * 24.)) * smoothstep(.83, .845, r) * (1. - smoothstep(.885, .9, r));
+        float spokes = pow(max(0., cos((a - time * 1.3 * spin) * 3.)), 40.) * smoothstep(.5, .55, r) * (1. - smoothstep(.76, .8, r));
+        float glow = exp(-r * r * 6.) * .25;
+        float a1 = (outer + inner * .8 + ticks * .9 + spokes * .7 + glow) * strength;
+        if (a1 < .004) discard;
+        vec3 color = mix(vec3(1., .62, .2), vec3(1., .95, .8), clamp(outer + ticks, 0., 1.));
+        gl_FragColor = vec4(color, a1);
+        #include <colorspace_fragment>
+      }`
+  }));
+  mesh.name = 'aura-hand-circle';
+  mesh.frustumCulled = false;
+  mesh.visible = false;
+  scene.add(mesh);
+  const facing = new THREE.Vector3(), z = new THREE.Vector3(0, 0, 1);
+  function update(palm, other, time, strength, power, sign) {
+    mesh.visible = strength > 0.01;
+    if (!mesh.visible) return;
+    facing.subVectors(other, palm);
+    if (facing.lengthSq() < 1e-6) facing.set(1, 0, 0);
+    mesh.position.copy(palm).addScaledVector(facing.normalize(), -0.03);
+    mesh.quaternion.setFromUnitVectors(z, facing);
+    mesh.scale.setScalar((0.14 + power * 0.12) * (0.6 + 0.4 * strength));
+    mesh.material.uniforms.time.value = time;
+    mesh.material.uniforms.strength.value = strength * 1.2;
+    mesh.material.uniforms.spin.value = sign;
+  }
+  return { update, hide() { mesh.visible = false; } };
+}
+
 export function createEnergyStreaks(scene) {
   const trails = [createHandTrail(scene), createHandTrail(scene)];
+  const circles = [createHandCircle(scene), createHandCircle(scene)];
+  let power = 0;
   const sparkles = createSparkles(scene, 700);
   const previous = [new THREE.Vector3(), new THREE.Vector3()];
   const p = new THREE.Vector3(), v = new THREE.Vector3(), move = new THREE.Vector3();
   let strength = 0, handRate = 0, auraRate = 0, started = false;
 
-  function update(active, power, palms, head, facing, now, dt) {
-    strength = THREE.MathUtils.lerp(strength, active ? 0.55 + 0.45 * power : 0, 1 - Math.exp(-dt * (active ? 10 : 4)));
-    for (let side = 0; side < 2; side++) trails[side].update(active, palms[side], now, strength);
+  function update(active, charge, palms, head, facing, now, dt) {
+    strength = THREE.MathUtils.lerp(strength, active ? 0.55 + 0.45 * charge : 0, 1 - Math.exp(-dt * (active ? 10 : 4)));
+    if (active) power = charge;
+    for (let side = 0; side < 2; side++) {
+      trails[side].update(active, palms[side], now, strength);
+      circles[side].update(palms[side], palms[1 - side], now, strength, power, side ? -1 : 1);
+    }
     if (active && dt > 0) {
       // Sparkles shed off the hands, more the faster they move.
       for (let side = 0; side < 2; side++) {
@@ -218,7 +269,7 @@ export function createEnergyStreaks(scene) {
 
   function reset() {
     strength = 0; handRate = auraRate = 0; started = false;
-    trails[0].reset(); trails[1].reset(); sparkles.reset();
+    trails[0].reset(); trails[1].reset(); circles[0].hide(); circles[1].hide(); sparkles.reset();
   }
   return { update, release, reset };
 }
