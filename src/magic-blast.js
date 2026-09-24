@@ -52,8 +52,6 @@ export function createMagicBlast({ scene, renderer, camera, rig, hands, collider
   const bitangent = new THREE.Vector3();
   const direction = new THREE.Vector3();
   const midpoint = new THREE.Vector3();
-  const auraHead = new THREE.Vector3();
-  const auraForward = new THREE.Vector3();
   const palms = [new THREE.Vector3(), new THREE.Vector3()];
   let cursor = 0;
   let emission = 0;
@@ -157,7 +155,7 @@ export function createMagicBlast({ scene, renderer, camera, rig, hands, collider
     p.velocity.copy(worldDirection).multiplyScalar(11 + shot.charge * 9);
     atmosphere.release(midpoint, worldDirection, shot.charge);
     p.group.position.addScaledVector(worldDirection, 0.08);
-    p.group.scale.setScalar(0.065 + shot.charge * 0.12);
+    p.group.scale.setScalar(0.08 + shot.charge * 0.12);
     p.uniforms.power.value = shot.charge;
     p.group.visible = true;
     pulse(0.5 + shot.charge * 0.45, 110);
@@ -317,7 +315,7 @@ export function createMagicBlast({ scene, renderer, camera, rig, hands, collider
       p.group.rotation.y += dt * 2;
       p.shells[0].rotation.z += dt * 1.1;
       p.shells[1].rotation.y -= dt * 1.5;
-      atmosphere.trail(p.previous, p.group.position, p.velocity, p.power, dt, p);
+      atmosphere.trail(p.previous, p.group.position, p.velocity, p.power, dt, p, p.group.scale.x);
       if (!gesture.active) {
         light.position.copy(p.group.position);
         light.intensity = 4 + p.power * 5;
@@ -393,13 +391,7 @@ export function createMagicBlast({ scene, renderer, camera, rig, hands, collider
       if (bucket > lastBucket && bucket > 0) { pulse(0.2 + gesture.charge * 0.3, 55); lastBucket = bucket; }
       else if (gesture.motion > 0.2 && hapticClock <= 0) { pulse(0.06 + gesture.charge * 0.12, 25); hapticClock = 0.14; }
     } else lastBucket = -1;
-    auraHead.copy(sample.head).applyMatrix4(rig.matrixWorld);
-    // Estimate torso facing from the hands, so looking around does not spin
-    // the surrounding aura with the headset.
-    auraForward.copy(midpoint).sub(auraHead);
-    auraForward.y = 0;
-    if (auraForward.lengthSq() < 0.01) auraForward.set(0, 0, -1).transformDirection(rig.matrixWorld);
-    atmosphere.charge(gesture.active, palms, midpoint, gesture.charge, gesture.motion, time, dt, orb.group.scale.x, auraHead, auraForward);
+    atmosphere.charge(gesture.active, palms, midpoint, gesture.charge, gesture.motion, time, dt, orb.group.scale.x);
     updateProjectiles(dt);
     atmosphere.update(dt, time);
     updateParticles(dt);
