@@ -14,7 +14,7 @@ Small Three.js/WebXR sandbox for testing VR mechanics without touching a game pr
 - Desktop WASD + mouse-look fallback
 - `window.playground` exposes `THREE`, `renderer`, `scene`, `camera`, `rig` and `hands` for quick experiments
 
-The hand state objects are available at `window.playground.hands.states`, including handedness, controller/grip nodes and the current XR input source. That is the intended hook for gesture experiments such as the two-hand charged fireball.
+The hand state objects are available at `window.playground.hands.states`, including handedness, controller/grip nodes and the current XR input source. The magic blast uses those hooks without changing the locomotion controls.
 
 ## Run locally
 
@@ -22,3 +22,16 @@ The hand state objects are available at `window.playground.hands.states`, includ
 npm install
 npm run dev
 ```
+
+## Magic blast
+
+1. In VR, hold **A on the right controller** with your palms facing each other, roughly 20–60 cm apart.
+2. Keep A held and slide your hands in opposite directions: one up while the other goes down, then reverse. Small circular movements also work. Streaks flow from your palms into the ball; more movement builds more charge.
+3. Once the indicator says READY (22%), push **both hands forward together** to launch it. You can keep charging to 100% for a larger, faster blast.
+4. Release A after firing, then hold it again to start the next ball. Releasing without pushing cancels the charge.
+
+The in-world panel shows gesture hints, charge and target hits. Haptics signal charge and release. Shots hit the room, blocks and rear target, with sparks and a shockwave. The rear target flashes on a hit.
+
+The desktop **Preview magic blast** button drives the same gesture recognizer with simulated hand motion. It previews the effect; actual Quest gesture comfort still needs a headset check.
+
+`src/blast-gesture.js` contains the thresholds and motion recognition. It uses tracking-space positions and hand movement relative to the headset so joystick movement cannot fire a shot. `src/magic-blast.js` contains rendering, input, haptics and collision. `window.playground.magic` exposes the recognizer and shot/hit counts for tuning.

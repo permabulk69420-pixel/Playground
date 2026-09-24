@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import './style.css';
 import { createVRHands } from './hands.js';
+import { createMagicBlast } from './magic-blast.js';
 
 const canvas = document.querySelector('#world');
 const enterVR = document.querySelector('#enter-vr');
@@ -46,6 +47,9 @@ const hands = createVRHands({
 // Astra/other prototypes can use window.playground.hands.states without rewiring input.
 window.playground = { THREE, renderer, scene, camera, rig, hands };
 
+const blastColliders = [];
+let blastTarget;
+
 function makeTestZone() {
   const floorMat = new THREE.MeshStandardMaterial({ color: 0x777b7e, roughness: 0.92, metalness: 0.0 });
   const wallMat = new THREE.MeshStandardMaterial({ color: 0x686c70, roughness: 0.95, metalness: 0.0 });
@@ -55,6 +59,7 @@ function makeTestZone() {
   floor.position.y = -0.06;
   floor.receiveShadow = true;
   scene.add(floor);
+  blastColliders.push(floor);
 
   const wallHeight = 4;
   const wallThickness = 0.16;
@@ -62,15 +67,18 @@ function makeTestZone() {
   back.position.set(0, wallHeight / 2, -9);
   back.receiveShadow = true;
   scene.add(back);
+  blastColliders.push(back);
 
   const left = new THREE.Mesh(new THREE.BoxGeometry(wallThickness, wallHeight, 18), wallMat);
   left.position.set(-9, wallHeight / 2, 0);
   left.receiveShadow = true;
   scene.add(left);
+  blastColliders.push(left);
 
   const right = left.clone();
   right.position.x = 9;
   scene.add(right);
+  blastColliders.push(right);
 
   const grid = new THREE.GridHelper(18, 18, 0x4a4d50, 0x5b5f62);
   grid.position.y = 0.004;
@@ -88,6 +96,7 @@ function makeTestZone() {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     scene.add(mesh);
+    blastColliders.push(mesh);
   }
 
   const target = new THREE.Mesh(
@@ -98,9 +107,21 @@ function makeTestZone() {
   target.position.set(0, 1.6, -8.82);
   target.castShadow = true;
   scene.add(target);
+  blastTarget = target;
+  blastColliders.push(target);
+  // Concentric markings make it easy to judge a shot from across the room.
+  for (const radius of [0.23, 0.48, 0.69]) {
+    const ring = new THREE.Mesh(new THREE.RingGeometry(radius - 0.013, radius, 64),
+      new THREE.MeshBasicMaterial({ color: 0x34393d, side: THREE.DoubleSide }));
+    ring.position.set(0, 1.6, -8.75);
+    scene.add(ring);
+  }
 }
 
 makeTestZone();
+const magic = createMagicBlast({ scene, renderer, camera, rig, hands,
+  colliders: blastColliders, target: blastTarget });
+window.playground.magic = magic;
 
 scene.add(new THREE.HemisphereLight(0xdde3e7, 0x3b3e41, 1.7));
 
@@ -303,15 +324,18 @@ renderer.xr.addEventListener('sessionend', () => {
   lastTime = 0;
 });
 
-function frame(time) {
+function frame(time, xrFrame) {
   const dt = lastTime ? Math.min((time - lastTime) / 1000, 0.05) : 0;
   lastTime = time;
 
   rig.updateMatrixWorld(true);
   if (renderer.xr.isPresenting) renderer.xr.updateCamera(camera);
 
-  hands.update(dt);
   updateMovement(dt);
+  rig.updateMatrixWorld(true);
+  if (renderer.xr.isPresenting) renderer.xr.updateCamera(camera);
+  magic.update(dt, xrFrame);
+  hands.update(dt);
   renderer.render(scene, camera);
 }
 

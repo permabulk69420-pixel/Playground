@@ -154,7 +154,9 @@ export function createVRHands({ renderer, parent, onError = console.warn }) {
 
       if (!state.mixerState) continue;
 
-      if (squeeze > 0.08 && trigger > 0.08) {
+      if (state.magicPose) {
+        setPose(state.mixerState, 'Open', 0);
+      } else if (squeeze > 0.08 && trigger > 0.08) {
         setPose(state.mixerState, 'Fist', Math.max(trigger, squeeze));
       } else if (squeeze > 0.08) {
         setPose(state.mixerState, 'Grip', squeeze);
