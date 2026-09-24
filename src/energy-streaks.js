@@ -29,7 +29,7 @@ function glowTexture() {
 
 function createVeil(scene) {
   const uniforms = { time: { value: 0 }, strength: { value: 0 } };
-  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.44, 1, 64, 1, true), new THREE.ShaderMaterial({
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 0.8, 1, 64, 1, true), new THREE.ShaderMaterial({
     uniforms, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
     vertexShader: `
       varying vec3 vWorld; varying vec3 vNormal; varying vec2 vUv;
@@ -66,7 +66,7 @@ function createVeil(scene) {
     update(head, time, strength) {
       mesh.visible = strength > 0.01;
       if (!mesh.visible) return;
-      const height = Math.max(0.8, head.y - 0.1);
+      const height = Math.max(0.8, head.y + 0.35);
       mesh.scale.set(1, height, 1);
       mesh.position.set(head.x, height / 2, head.z);
       uniforms.time.value = time;
@@ -162,10 +162,182 @@ function createHandTrail(scene) {
   return { update, reset };
 }
 
+const STAR = `
+float star(vec2 p) {
+  float core = exp(-dot(p, p) * 18.);
+  float rays = exp(-abs(p.x) * 26.) * exp(-abs(p.y) * 3.2) + exp(-abs(p.y) * 26.) * exp(-abs(p.x) * 3.2);
+  return core + rays * .85;
+}`;
+
+function createSparkles(scene, count) {
+  const quad = new THREE.PlaneGeometry(1, 1);
+  const geometry = new THREE.InstancedBufferGeometry();
+  geometry.index = quad.index;
+  geometry.setAttribute('position', quad.attributes.position);
+  geometry.setAttribute('uv', quad.attributes.uv);
+  const place = new Float32Array(count * 4), look = new Float32Array(count * 4);
+  const dynamic = (array) => new THREE.InstancedBufferAttribute(array, 4).setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute('place', dynamic(place));
+  geometry.setAttribute('look', dynamic(look));
+  geometry.instanceCount = count;
+  const mesh = new THREE.Mesh(geometry, new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    vertexShader: `
+      attribute vec4 place; attribute vec4 look; varying vec2 vUv; varying vec4 vLook;
+      void main() {
+        vUv = uv; vLook = look;
+        vec4 view = viewMatrix * vec4(place.xyz, 1.);
+        float c = cos(look.w), s = sin(look.w);
+        view.xy += mat2(c, s, -s, c) * position.xy * place.w;
+        gl_Position = projectionMatrix * view;
+      }`,
+    fragmentShader: `${STAR}
+      varying vec2 vUv; varying vec4 vLook;
+      void main() {
+        float a = star(vUv * 2. - 1.) * vLook.x;
+        if (a < .004) discard;
+        vec3 color = mix(vec3(1., .78, .38), vec3(1., .97, .9), vLook.y);
+        gl_FragColor = vec4(color, a);
+        #include <colorspace_fragment>
+      }`
+  }));
+  mesh.name = 'aura-sparkles';
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+
+  const pos = new Float32Array(count * 3), vel = new Float32Array(count * 3);
+  const life = new Float32Array(count), duration = new Float32Array(count);
+  const size = new Float32Array(count), twinkle = new Float32Array(count), seed = new Float32Array(count);
+  let cursor = 0;
+  function emit(p, v, lifetime, s, rate) {
+    const i = cursor; cursor = (cursor + 1) % count;
+    pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z;
+    vel[i * 3] = v.x; vel[i * 3 + 1] = v.y; vel[i * 3 + 2] = v.z;
+    life[i] = duration[i] = lifetime; size[i] = s; twinkle[i] = rate; seed[i] = Math.random() * 20;
+  }
+  function update(dt, time) {
+    for (let i = 0; i < count; i++) {
+      if (life[i] <= 0) { place[i * 4 + 3] = 0; continue; }
+      life[i] -= dt;
+      if (life[i] <= 0) { place[i * 4 + 3] = 0; continue; }
+      const t = 1 - life[i] / duration[i], j = i * 3;
+      const damping = Math.exp(-dt * 2);
+      vel[j] *= damping; vel[j + 1] = vel[j + 1] * damping + dt * 0.05; vel[j + 2] *= damping;
+      pos[j] += vel[j] * dt; pos[j + 1] += vel[j + 1] * dt; pos[j + 2] += vel[j + 2] * dt;
+      // Sharp on/off twinkle so sparkles flash rather than just fade.
+      const flash = Math.pow(0.5 + 0.5 * Math.sin(time * twinkle[i] + seed[i]), 3);
+      const fade = Math.min(1, t * 8) * (1 - t);
+      place[i * 4] = pos[j]; place[i * 4 + 1] = pos[j + 1]; place[i * 4 + 2] = pos[j + 2];
+      place[i * 4 + 3] = size[i] * (0.6 + flash * 0.8);
+      look[i * 4] = fade * (0.35 + flash * 0.9);
+      look[i * 4 + 1] = flash;
+      look[i * 4 + 3] = seed[i] + time * 0.6;
+    }
+    geometry.attributes.place.needsUpdate = true;
+    geometry.attributes.look.needsUpdate = true;
+  }
+  function reset() { life.fill(0); place.fill(0); geometry.attributes.place.needsUpdate = true; }
+  return { emit, update, reset };
+}
+
+// Light trails that swirl around a hand: each is sampled from its own orbit,
+// so the curves stay smooth, tapering from a bright head to a faded tail.
+function createHandOrbits(scene, count) {
+  const samples = 40, vertices = count * samples * 2;
+  const positions = new Float32Array(vertices * 3), tangents = new Float32Array(vertices * 3);
+  const shades = new Float32Array(vertices * 4), widths = new Float32Array(vertices), uvs = new Float32Array(vertices * 2);
+  const indices = [];
+  for (let e = 0; e < count; e++) for (let j = 0; j < samples; j++) {
+    const at = (e * samples + j) * 2;
+    uvs.set([0, j / (samples - 1), 1, j / (samples - 1)], at * 2);
+    if (j < samples - 1) indices.push(at, at + 1, at + 2, at + 1, at + 3, at + 2);
+  }
+  const geo = new THREE.BufferGeometry();
+  const dynamic = (array, size) => new THREE.BufferAttribute(array, size).setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute('position', dynamic(positions, 3));
+  geo.setAttribute('normal', dynamic(tangents, 3));
+  geo.setAttribute('shade', dynamic(shades, 4));
+  geo.setAttribute('width', dynamic(widths, 1));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  const mesh = new THREE.Mesh(geo, new THREE.ShaderMaterial({
+    uniforms: { time: { value: 0 } },
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    vertexShader: `
+      attribute vec4 shade; attribute float width; varying vec4 vShade; varying vec2 vUv;
+      void main() {
+        vShade = shade; vUv = uv;
+        vec3 side = normalize(cross(normalize(cameraPosition - position), normal));
+        gl_Position = projectionMatrix * viewMatrix * vec4(position + side * (uv.x * 2. - 1.) * width, 1.);
+      }`,
+    fragmentShader: `
+      uniform float time; varying vec4 vShade; varying vec2 vUv;
+      void main() {
+        float e = vUv.x * 2. - 1.; e *= e;
+        float shimmer = .7 + .3 * sin(vUv.y * 40. - time * 22.);
+        float glow = exp(-e * 20.) * 1.4 + exp(-e * 2.5) * .4 * shimmer;
+        gl_FragColor = vec4(vShade.rgb * glow, vShade.a * glow);
+        #include <colorspace_fragment>
+      }`
+  }));
+  mesh.name = 'aura-hand-orbits';
+  mesh.frustumCulled = false;
+  mesh.visible = false;
+  scene.add(mesh);
+  const orbits = Array.from({ length: count }, (_, i) => ({
+    phase: i * 1.57, speed: 5.5 + (i % 4) * 1.3, radius: 0.1 + (i % 4) * 0.025, tilt: (i % 3 - 1) * 0.6,
+    head: new THREE.Vector3()
+  }));
+  const axis = new THREE.Vector3(), u = new THREE.Vector3(), w = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+  const point = new THREE.Vector3(), next = new THREE.Vector3(), dir = new THREE.Vector3();
+  const hot = new THREE.Color(0xffffff), gold = new THREE.Color(0xffc75a), rose = new THREE.Color(0xff6fb0), color = new THREE.Color();
+  function place(o, a, palm, out) {
+    const r = o.radius * (1 + 0.15 * Math.sin(a * 2));
+    out.copy(palm).addScaledVector(u, Math.cos(a) * r).addScaledVector(w, Math.sin(a) * r)
+      .addScaledVector(axis, Math.sin(a + o.tilt * 3) * 0.035 + o.tilt * 0.02);
+  }
+  function update(palm, other, time, dt, strength) {
+    mesh.visible = strength > 0.01;
+    if (!mesh.visible) return;
+    mesh.material.uniforms.time.value = time;
+    axis.subVectors(other, palm);
+    if (axis.lengthSq() < 1e-6) axis.set(1, 0, 0);
+    axis.normalize();
+    u.crossVectors(axis, up);
+    if (u.lengthSq() < 1e-4) u.set(0, 0, 1);
+    u.normalize();
+    w.crossVectors(axis, u);
+    for (let i = 0; i < count; i++) {
+      const o = orbits[i];
+      o.phase += dt * o.speed;
+      for (let j = 0; j < samples; j++) {
+        const t = j / (samples - 1), a = o.phase - t * 3.4;
+        place(o, a, palm, point); place(o, a + 0.01, palm, next);
+        dir.subVectors(next, point).normalize();
+        if (j === 0) o.head.copy(point);
+        const fade = Math.pow(1 - t, 1.4) * strength;
+        color.copy(hot).lerp(gold, Math.min(1, t * 3)).lerp(rose, Math.max(0, t * 1.6 - 0.6));
+        for (let s = 0; s < 2; s++) {
+          const v = (i * samples + j) * 2 + s;
+          point.toArray(positions, v * 3); dir.toArray(tangents, v * 3);
+          shades.set([color.r, color.g, color.b, fade], v * 4);
+          widths[v] = 0.022 * (1 - t * 0.75) * (0.7 + 0.3 * strength);
+        }
+      }
+    }
+    for (const name of ['position', 'normal', 'shade', 'width']) geo.attributes[name].needsUpdate = true;
+  }
+  return { update, orbits, hide() { mesh.visible = false; } };
+}
+
 export function createEnergyStreaks(scene) {
   const texture = glowTexture();
   const veil = createVeil(scene);
   const trails = [createHandTrail(scene), createHandTrail(scene)];
+  const orbits = [createHandOrbits(scene, 4), createHandOrbits(scene, 4)];
+  const sparkles = createSparkles(scene, 400);
+  const p = new THREE.Vector3(), v = new THREE.Vector3();
+  let flareRate = 0;
   // Each hand: a tight white-gold core and a wide warm halo.
   const glows = [0, 1].map(() => {
     const make = (hex) => {
@@ -183,9 +355,10 @@ export function createEnergyStreaks(scene) {
 
   function update(active, power, palms, head, facing, now, dt) {
     strength = THREE.MathUtils.lerp(strength, active ? 0.55 + 0.45 * power : 0, 1 - Math.exp(-dt * (active ? 6 : 4)));
-    veil.update(head, now, strength * 0.9);
+    veil.update(head, now, strength * 1.3);
     for (let side = 0; side < 2; side++) {
       trails[side].update(active, palms[side], now, strength);
+      orbits[side].update(palms[side], palms[1 - side], now, dt, strength);
       const pulse = 1 + 0.12 * Math.sin(now * 9 + side * 2);
       const { core, halo } = glows[side];
       core.visible = halo.visible = strength > 0.01;
@@ -195,6 +368,18 @@ export function createEnergyStreaks(scene) {
       core.material.opacity = strength;
       halo.material.opacity = strength * 0.55;
     }
+    // Big flashing star flares out around the body.
+    if (active) {
+      flareRate += dt * (14 + power * 22);
+      while (flareRate >= 1) {
+        flareRate--;
+        const angle = Math.random() * Math.PI * 2, radius = 0.5 + Math.random() * 0.7;
+        p.set(head.x + Math.cos(angle) * radius, 0.2 + Math.random() * (head.y + 0.2), head.z + Math.sin(angle) * radius);
+        v.set(0, 0.08, 0);
+        sparkles.emit(p, v, 0.6 + Math.random() * 0.5, 0.1 + Math.random() * 0.1, 8 + Math.random() * 8);
+      }
+    }
+    sparkles.update(dt, now);
     light.position.addVectors(palms[0], palms[1]).multiplyScalar(0.5);
     light.intensity = strength * 2.5;
   }
@@ -203,6 +388,8 @@ export function createEnergyStreaks(scene) {
   function reset() {
     strength = 0; veil.hide(); light.intensity = 0;
     for (const t of trails) t.reset();
+    for (const o of orbits) o.hide();
+    sparkles.reset(); flareRate = 0;
     for (const g of glows) g.core.visible = g.halo.visible = false;
   }
   return { update, release, reset };
