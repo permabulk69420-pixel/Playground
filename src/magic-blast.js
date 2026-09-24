@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { BlastGesture } from './blast-gesture.js';
+import { createPlasmaOrb, createShockwave, createBlastAtmosphere } from './blast-vfx.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const ORANGE = new THREE.Color(0xff741b);
@@ -23,75 +24,17 @@ function glowTexture() {
   return texture;
 }
 
-function makeOrb(texture) {
-  const group = new THREE.Group();
-  const uniforms = { time: { value: 0 }, power: { value: 0 } };
-  const material = new THREE.ShaderMaterial({
-    uniforms,
-    vertexShader: `
-      uniform float time;
-      varying vec3 vLocal;
-      varying vec3 vNormal;
-      varying vec3 vView;
-      void main() {
-        vLocal = position;
-        float wave = sin(position.x*18.0+time*4.0)*sin(position.y*15.0-time*3.0)*sin(position.z*17.0+time*2.0);
-        vec3 p = position + normal * wave * 0.024;
-        vec4 view = modelViewMatrix * vec4(p, 1.0);
-        vNormal = normalize(normalMatrix * normal);
-        vView = -view.xyz;
-        gl_Position = projectionMatrix * view;
-      }`,
-    fragmentShader: `
-      uniform float time;
-      uniform float power;
-      varying vec3 vLocal;
-      varying vec3 vNormal;
-      varying vec3 vView;
-      void main() {
-        vec3 p = vLocal;
-        float a = sin(p.x*17.0+p.y*9.0+time*3.8+sin(p.z*12.0-time*2.0)*2.0);
-        float b = sin(p.y*23.0-p.z*14.0-time*4.7+sin(p.x*11.0+time)*2.0);
-        float veins = pow(1.0-abs(a*b), 9.0);
-        float rim = pow(1.0-abs(dot(normalize(vNormal),normalize(vView))), 2.1);
-        vec3 molten = mix(vec3(.48,.016,.002), vec3(2.6,.43,.025), .5+.5*a);
-        vec3 color = molten + veins*vec3(3.4,2.2,.7) + rim*vec3(2.4,.65,.06);
-        gl_FragColor = vec4(color*(.85+power*.6),1.0);
-        #include <tonemapping_fragment>
-        #include <colorspace_fragment>
-      }`
-  });
-  const shell = new THREE.Mesh(new THREE.SphereGeometry(1, 40, 24), material);
-  group.add(shell);
-  const glow = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: texture, transparent: true, blending: THREE.AdditiveBlending,
-    depthWrite: false, toneMapped: false, opacity: 0.72
-  }));
-  glow.scale.set(6, 6, 1);
-  group.add(glow);
-  const rings = [];
-  for (let i = 0; i < 3; i++) {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.18 + i * 0.1, 0.016, 5, 80, Math.PI * 1.6),
-      new THREE.MeshBasicMaterial({ color: i === 1 ? 0xfff0bc : 0xffa02f, transparent: true,
-        opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
-    ring.rotation.set(i * 1.1, i * 0.8, i);
-    group.add(ring);
-    rings.push(ring);
-  }
-  group.visible = false;
-  return { group, uniforms, rings, glow };
-}
-
 export function createMagicBlast({ scene, renderer, camera, rig, hands, colliders, target }) {
   const gesture = new BlastGesture();
+  const atmosphere = createBlastAtmosphere(scene);
   const texture = glowTexture();
-  const orb = makeOrb(texture);
+  const orb = createPlasmaOrb(texture);
   scene.add(orb.group);
   const light = new THREE.PointLight(0xff8a26, 0, 4, 2);
   scene.add(light);
 
   // One instanced batch for the palm ribbons, trailing sparks and impact embers.
-  const count = 280;
+  const count = 480;
   const particles = Array.from({ length: count }, () => ({
     life: 0, duration: 1, type: '', side: 0, phase: 0, radius: 0,
     position: new THREE.Vector3(), previous: new THREE.Vector3(), velocity: new THREE.Vector3()
@@ -131,15 +74,12 @@ export function createMagicBlast({ scene, renderer, camera, rig, hands, collider
   };
 
   const projectiles = Array.from({ length: 6 }, () => {
-    const visual = makeOrb(texture);
+    const visual = createPlasmaOrb(texture);
     scene.add(visual.group);
     return { ...visual, life: 0, power: 0, velocity: new THREE.Vector3(), previous: new THREE.Vector3() };
   });
   const shockwaves = Array.from({ length: 5 }, () => {
-    const mesh = new THREE.Mesh(new THREE.RingGeometry(0.84, 1, 64), new THREE.MeshBasicMaterial({
-      color: 0xffc56f, transparent: true, opacity: 0, side: THREE.DoubleSide,
-      depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false
-    }));
+    const mesh = createShockwave();
     mesh.visible = false;
     scene.add(mesh);
     return { mesh, life: 0, power: 0 };
@@ -188,13 +128,14 @@ export function createMagicBlast({ scene, renderer, camera, rig, hands, collider
   }
 
   function burst(position, power, normal) {
-    for (let i = 0; i < 65 + power * 55; i++) {
+    atmosphere.burst(position, power, normal);
+    for (let i = 0; i < 100 + power * 90; i++) {
       scratch.randomDirection().multiplyScalar(1.2 + Math.random() * (3 + power * 3));
       if (normal && scratch.dot(normal) < 0) scratch.reflect(normal);
-      particle('ember', position, scratch, 0.3 + Math.random() * 0.65, 0.003 + Math.random() * 0.006);
+      particle('ember', position, scratch, 0.5 + Math.random() * 1.1, 0.003 + Math.random() * 0.006);
     }
     const wave = shockwaves.find(w => w.life <= 0) || shockwaves[0];
-    wave.life = 0.48;
+    wave.life = 0.7;
     wave.power = power;
     wave.mesh.position.copy(position);
     if (normal) wave.mesh.position.addScaledVector(normal, 0.03);
@@ -206,12 +147,15 @@ export function createMagicBlast({ scene, renderer, camera, rig, hands, collider
   function launch(shot) {
     const p = projectiles.find(p => p.life <= 0) || projectiles[0];
     p.life = 3;
+    p.fireEmission = 0;
+    p.emission = 0;
     p.power = shot.charge;
     p.group.position.copy(midpoint);
     worldDirection.copy(shot.direction).transformDirection(rig.matrixWorld);
     p.velocity.copy(worldDirection).multiplyScalar(11 + shot.charge * 9);
+    atmosphere.release(midpoint, worldDirection, shot.charge);
     p.group.position.addScaledVector(worldDirection, 0.08);
-    p.group.scale.setScalar(0.055 + shot.charge * 0.105);
+    p.group.scale.setScalar(0.065 + shot.charge * 0.12);
     p.uniforms.power.value = shot.charge;
     p.group.visible = true;
     pulse(0.5 + shot.charge * 0.45, 110);
@@ -331,7 +275,7 @@ export function createMagicBlast({ scene, renderer, camera, rig, hands, collider
         if (p.type === 'ember') { p.velocity.y -= dt * 2.5; p.velocity.multiplyScalar(Math.exp(-dt * 1.4)); }
       }
       direction.subVectors(p.position, p.previous);
-      const length = clamp(direction.length() * 2, 0.008, p.type === 'stream' ? 0.075 : 0.18);
+      const length = clamp(direction.length() * 2, 0.008, p.type === 'stream' ? 0.035 : 0.14);
       if (direction.lengthSq() < 0.000001) direction.copy(UP);
       direction.normalize();
       dummy.position.copy(p.position).addScaledVector(direction, -length * 0.5);
@@ -368,22 +312,29 @@ export function createMagicBlast({ scene, renderer, camera, rig, hands, collider
       }
       p.group.position.addScaledVector(p.velocity, dt);
       p.uniforms.time.value = time;
-      for (let i = 0; i < p.rings.length; i++) p.rings[i].rotation.z += dt * (4 + i);
+      p.group.rotation.y += dt * 2;
+      p.shells[0].rotation.z += dt * 1.1;
+      p.shells[1].rotation.y -= dt * 1.5;
+      atmosphere.trail(p.previous, p.group.position, p.velocity, p.power, dt, p);
+      if (!gesture.active) {
+        light.position.copy(p.group.position);
+        light.intensity = 4 + p.power * 5;
+      }
       // Time-based trail density stays the same at 72/90/120 Hz.
       p.emission = (p.emission || 0) + dt * 100;
       while (p.emission >= 1) {
         p.emission--;
         scratch.randomDirection().multiplyScalar(0.35).addScaledVector(direction, -1.5);
         tangent.lerpVectors(p.previous, p.group.position, Math.random());
-        particle('trail', tangent, scratch, 0.14 + Math.random() * 0.2, 0.008 + p.power * 0.008);
+        particle('trail', tangent, scratch, 0.14 + Math.random() * 0.2, 0.002 + p.power * 0.0025);
       }
     }
     for (const wave of shockwaves) {
       if (wave.life <= 0) continue;
       wave.life -= dt;
-      const progress = 1 - Math.max(wave.life, 0) / 0.48;
-      wave.mesh.scale.setScalar(0.08 + progress * (0.7 + wave.power * 1.1));
-      wave.mesh.material.opacity = (1 - progress) * 0.8;
+      const progress = 1 - Math.max(wave.life, 0) / 0.7;
+      wave.mesh.scale.setScalar(0.12 + Math.pow(progress, 0.65) * (1.2 + wave.power * 1.8));
+      wave.mesh.material.uniforms.progress.value = progress;
       wave.mesh.visible = wave.life > 0;
     }
     targetFlash = Math.max(0, targetFlash - dt * 2);
@@ -392,7 +343,7 @@ export function createMagicBlast({ scene, renderer, camera, rig, hands, collider
   }
 
   function reset() {
-    gesture.reset(); demo = false; emission = 0; lastBucket = -1;
+    gesture.reset(); atmosphere.reset(); demo = false; emission = 0; lastBucket = -1;
     orb.group.visible = false; light.intensity = 0;
     for (const p of projectiles) { p.life = 0; p.group.visible = false; }
     for (const p of particles) p.life = 0;
@@ -415,23 +366,24 @@ export function createMagicBlast({ scene, renderer, camera, rig, hands, collider
     } else if (gesture.active) gesture.reset();
     for (const state of hands.states) state.magicPose = gesture.active;
     orb.group.visible = gesture.active;
-    light.intensity = gesture.active ? 0.5 + gesture.charge * 4 : 0;
+    light.intensity = gesture.active ? 1 + gesture.charge * 8 : 0;
     if (gesture.active) {
       orb.group.position.copy(midpoint);
       light.position.copy(midpoint);
-      const radius = 0.032 + gesture.charge * 0.1;
-      const maxRadius = palms[0].distanceTo(palms[1]) * 0.32;
+      const radius = 0.038 + gesture.charge * 0.115;
+      const maxRadius = palms[0].distanceTo(palms[1]) * 0.29;
       orb.group.scale.setScalar(Math.min(maxRadius, radius) * (1 + Math.sin(time * 18) * 0.025));
       orb.uniforms.time.value = time;
       orb.uniforms.power.value = gesture.charge;
-      orb.glow.material.opacity = 0.5 + gesture.charge * 0.22;
-      orb.rings.forEach((ring, i) => { ring.rotation.z += dt * (1.2 + gesture.motion * 5) * (i % 2 ? -1 : 1); ring.rotation.y += dt * (0.3 + i * 0.2); });
+      orb.glow.material.opacity = 0.18 + gesture.charge * 0.1;
+      orb.shells[0].rotation.y += dt * (0.7 + gesture.motion);
+      orb.shells[1].rotation.z -= dt * (0.4 + gesture.motion * 0.6);
       emission += dt * (12 + gesture.motion * 110);
       while (emission >= 1) {
         emission--;
         const side = Math.random() < 0.5 ? 0 : 1;
         scratch.set(0, 0, 0);
-        const p = particle('stream', palms[side], scratch, 0.22 + Math.random() * 0.2, 0.003 + gesture.motion * 0.003);
+        const p = particle('stream', palms[side], scratch, 0.22 + Math.random() * 0.2, 0.0015 + gesture.motion * 0.0015);
         p.side = side;
       }
       hapticClock -= dt;
@@ -439,7 +391,9 @@ export function createMagicBlast({ scene, renderer, camera, rig, hands, collider
       if (bucket > lastBucket && bucket > 0) { pulse(0.2 + gesture.charge * 0.3, 55); lastBucket = bucket; }
       else if (gesture.motion > 0.2 && hapticClock <= 0) { pulse(0.06 + gesture.charge * 0.12, 25); hapticClock = 0.14; }
     } else lastBucket = -1;
+    atmosphere.charge(gesture.active, palms, midpoint, gesture.charge, gesture.motion, time, dt, orb.group.scale.x);
     updateProjectiles(dt);
+    atmosphere.update(dt, time);
     updateParticles(dt);
     drawPanel();
   }
