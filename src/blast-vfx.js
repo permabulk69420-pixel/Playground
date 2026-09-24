@@ -254,7 +254,8 @@ export function createBlastAtmosphere(scene) {
   let emission=0;
   function charge(active,palms,center,power,motion,time,dt,radius,head,forward) {
     aura.update(active,power,palms,head,forward,time,dt);
-    streams.update(active,palms,center,power,motion,time);
+    // The palm coils are replaced by the aura's spark streams.
+    streams.update(false,palms,center,power,motion,time);
     if(!active){emission=0;return;}
     emission+=dt*(14+power*24+motion*18);
     while(emission>=1){
