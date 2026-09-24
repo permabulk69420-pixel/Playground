@@ -107,7 +107,7 @@ function createFlamePool(scene, count, ember) {
 }
 
 function createRibbons(scene) {
-  const bodyCount = 16, palmCount = 8, count = bodyCount + palmCount, samples = 48;
+  const bodyCount = 24, palmCount = 8, count = bodyCount + palmCount, samples = 48;
   const up = new THREE.Vector3(0, 1, 0), right = new THREE.Vector3(), forward = new THREE.Vector3();
   const axis = new THREE.Vector3(), cross = new THREE.Vector3(), other = new THREE.Vector3();
   const point = new THREE.Vector3(), next = new THREE.Vector3(), dir = new THREE.Vector3();
@@ -207,7 +207,7 @@ function createRibbons(scene) {
       e.phase += dt * e.spin * e.speed * (palm ? 2.6 : 0.6) * (0.75 + storedPower * 0.8);
       // Trail covers a fixed arc of the orbit behind the head.
       const arc = (palm ? 3 : 2.2) * e.spin;
-      const baseWidth = (palm ? 0.009 : 0.024) * (0.65 + 0.35 * storedPower);
+      const baseWidth = (palm ? 0.009 : 0.034) * (0.65 + 0.35 * storedPower);
       for (let j = 0; j < samples; j++) {
         const t = j / (samples - 1);
         const a = e.phase - arc * t;
@@ -227,7 +227,7 @@ function createRibbons(scene) {
         }
         if (j === 0) {
           dummy.position.copy(point);
-          dummy.scale.setScalar((palm ? 0.006 : 0.012) * strength * visible);
+          dummy.scale.setScalar((palm ? 0.006 : 0.016) * strength * visible);
           e.head.copy(point); e.visible = visible;
           dummy.updateMatrix();
           heads.setMatrixAt(i, dummy.matrix);
@@ -245,7 +245,7 @@ function createRibbons(scene) {
 
 export function createEnergyStreaks(scene) {
   const ribbons = createRibbons(scene);
-  const flames = createFlamePool(scene, 700, false);
+  const flames = createFlamePool(scene, 1400, false);
   const embers = createFlamePool(scene, 220, true);
   const center = new THREE.Vector3(), p = new THREE.Vector3(), v = new THREE.Vector3();
   let wispRate = 0, emberRate = 0;
@@ -256,16 +256,16 @@ export function createEnergyStreaks(scene) {
     center.set(head.x, 0, head.z);
     if (active && strength > 0.02) {
       // Each body streak sheds small flame wisps from its glowing head.
-      wispRate += dt * (60 + power * 90);
+      wispRate += dt * (260 + power * 260);
       while (wispRate >= 1) {
         wispRate--;
-        const e = ribbons.emitters[Math.floor(Math.random() * 16)];
+        const e = ribbons.emitters[Math.floor(Math.random() * 24)];
         if (e.visible < 0.2) continue;
         p.copy(e.head);
         v.set((Math.random() - 0.5) * 0.1, 0.25 + Math.random() * 0.3, (Math.random() - 0.5) * 0.1);
-        flames.emit(p, v, 0.3 + Math.random() * 0.25, 0.05 + power * 0.04, 0.45 * e.visible);
+        flames.emit(p, v, 0.35 + Math.random() * 0.3, 0.08 + power * 0.06, 0.5 * e.visible);
       }
-      emberRate += dt * (25 + power * 40);
+      emberRate += dt * (60 + power * 70);
       while (emberRate >= 1) {
         emberRate--;
         const angle = Math.random() * Math.PI * 2, radius = 0.5 + Math.random() * 0.6;
