@@ -12,7 +12,7 @@ export function createEnergyStreaks(scene) {
   let strength = 0, storedPower = 0, burst = 0, time = 0;
   const emitters = Array.from({ length: count }, (_, i) => ({
     phase: i * 2.399963, speed: 1.3 + (i * 0.317 % 1) * 0.8, spin: i % 3 === 0 ? -1 : 1,
-    radius: 0.42 + (i * 0.731 % 1) * 0.28, tilt: (i * 0.529 % 1 - 0.5) * 0.9,
+    radius: 1.0 + (i * 0.731 % 1) * 0.9, tilt: (i * 0.529 % 1 - 0.5) * 0.9,
     rise: i * 0.618 % 1, wobble: 0.08 + (i * 0.413 % 1) * 0.1
   }));
 
@@ -64,14 +64,14 @@ export function createEnergyStreaks(scene) {
   scene.add(heads);
   const dummy = new THREE.Object3D(), color = new THREE.Color();
 
-  // Body ribbons spiral upward around the torso on tilted orbits; palm ribbons
+  // Body ribbons spiral from the floor to above head height, 1-2 m out; palm ribbons
   // coil tightly around each hand. `a` is the orbit angle along the path.
   function place(e, i, a, head, palms, out) {
     if (i < bodyCount) {
-      const radius = e.radius * (1 + burst * 1.6);
+      const radius = e.radius * (1 + burst * 1.2);
       const climb = (e.rise + time * 0.12 * (0.6 + storedPower)) % 1;
       out.copy(head).addScaledVector(right, Math.cos(a) * radius).addScaledVector(forward, Math.sin(a) * radius);
-      out.y = head.y - 1.15 + climb * 0.85 + Math.sin(a + i) * e.wobble + Math.cos(a) * e.tilt * 0.3;
+      out.y = head.y - 1.45 + climb * 2.1 + Math.sin(a + i) * e.wobble + Math.cos(a) * e.tilt * 0.3;
       return Math.sin(climb * Math.PI);
     }
     const side = i % 2;
@@ -100,10 +100,10 @@ export function createEnergyStreaks(scene) {
     right.crossVectors(forward, up).normalize();
     for (let i = 0; i < count; i++) {
       const e = emitters[i], palm = i >= bodyCount;
-      e.phase += dt * e.spin * e.speed * (palm ? 2.6 : 1) * (0.75 + storedPower * 0.8);
+      e.phase += dt * e.spin * e.speed * (palm ? 2.6 : 0.6) * (0.75 + storedPower * 0.8);
       // Trail covers a fixed arc of the orbit behind the head.
-      const arc = (palm ? 3 : 2.6) * e.spin;
-      const baseWidth = (palm ? 0.012 : 0.026) * (0.65 + 0.35 * storedPower);
+      const arc = (palm ? 3 : 2.2) * e.spin;
+      const baseWidth = (palm ? 0.012 : 0.045) * (0.65 + 0.35 * storedPower);
       for (let j = 0; j < samples; j++) {
         const t = j / (samples - 1);
         const a = e.phase - arc * t;
@@ -123,7 +123,7 @@ export function createEnergyStreaks(scene) {
         }
         if (j === 0) {
           dummy.position.copy(point);
-          dummy.scale.setScalar((palm ? 0.007 : 0.013) * strength * visible);
+          dummy.scale.setScalar((palm ? 0.007 : 0.022) * strength * visible);
           dummy.updateMatrix();
           heads.setMatrixAt(i, dummy.matrix);
         }
