@@ -30,7 +30,7 @@ npm run dev
 3. Once the indicator says READY (22%), push **both hands forward together** to launch it. You can keep charging to 100% for a larger, faster blast.
 4. Release A after firing, then hold it again to start the next ball. Releasing without pushing cancels the charge.
 
-The in-world panel shows gesture hints, charge and target hits. Haptics signal charge and release. While charging, the ball burns with a hot core and flames licking off the top. Shots leave a flame-and-smoke trail and hit the room, blocks and rear target with a fireball explosion, sparks, smoke and a shockwave. The rear target flashes on a hit.
+The in-world panel shows gesture hints, charge and target hits. Haptics signal charge and release. Shots hit the room, blocks and rear target, with sparks and a shockwave. The rear target flashes on a hit.
 
 The desktop **Preview magic blast** button drives the same gesture recognizer with simulated hand motion. It previews the effect; actual Quest gesture comfort still needs a headset check.
 
