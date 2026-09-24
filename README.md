@@ -30,7 +30,7 @@ npm run dev
 3. Once the indicator says READY (22%), push **both hands forward together** to launch it. You can keep charging to 100% for a larger, faster blast.
 4. Release A after firing, then hold it again to start the next ball. Releasing without pushing cancels the charge.
 
-While charging, glowing energy ribbons spiral up around your body and coil around your hands, then fly outward when you fire. The in-world panel shows gesture hints, charge and target hits. Haptics signal charge and release. Shots hit the room, blocks and rear target, with sparks and a shockwave. The rear target flashes on a hit.
+While charging, you stand in a ring of fire with flames and embers rising around you; firing blasts the ring outward. The in-world panel shows gesture hints, charge and target hits. Haptics signal charge and release. Shots hit the room, blocks and rear target, with sparks and a shockwave. The rear target flashes on a hit.
 
 The desktop **Preview magic blast** button drives the same gesture recognizer with simulated hand motion. It previews the effect; actual Quest gesture comfort still needs a headset check.
 
