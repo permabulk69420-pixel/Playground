@@ -114,7 +114,7 @@ function createRibbons(scene) {
   let strength = 0, storedPower = 0, burst = 0, time = 0;
   const emitters = Array.from({ length: count }, (_, i) => ({
     phase: i * 2.399963, speed: 1.3 + (i * 0.317 % 1) * 0.8, spin: i % 3 === 0 ? -1 : 1,
-    radius: 0.65 + (i * 0.731 % 1) * 0.4, tilt: (i * 0.529 % 1 - 0.5) * 0.9,
+    radius: 0.5 + (i * 0.731 % 1) * 0.4, tilt: (i * 0.529 % 1 - 0.5) * 0.9,
     rise: i * 0.618 % 1, wobble: 0.08 + (i * 0.413 % 1) * 0.1,
     head: new THREE.Vector3(), visible: 0
   }));
@@ -174,7 +174,7 @@ function createRibbons(scene) {
       const radius = e.radius * (1 + burst * 1.2);
       const climb = (e.rise + time * 0.12 * (0.6 + storedPower)) % 1;
       out.copy(head).addScaledVector(right, Math.cos(a) * radius).addScaledVector(forward, Math.sin(a) * radius);
-      out.y = head.y - 1.5 + climb * 1.3 + Math.sin(a + i) * e.wobble + Math.cos(a) * e.tilt * 0.3;
+      out.y = head.y - 1.5 + climb * 1.25 + Math.sin(a + i) * e.wobble + Math.cos(a) * e.tilt * 0.3;
       return Math.sin(climb * Math.PI);
     }
     const side = i % 2;
@@ -206,7 +206,7 @@ function createRibbons(scene) {
       e.phase += dt * e.spin * e.speed * (palm ? 2.6 : 0.6) * (0.75 + storedPower * 0.8);
       // Trail covers a fixed arc of the orbit behind the head.
       const arc = (palm ? 3 : 3.2) * e.spin;
-      const baseWidth = (palm ? 0.009 : 0.055) * (0.7 + 0.3 * storedPower);
+      const baseWidth = (palm ? 0.009 : 0.08) * (0.7 + 0.3 * storedPower);
       for (let j = 0; j < samples; j++) {
         const t = j / (samples - 1);
         const a = e.phase - arc * t;
@@ -502,13 +502,13 @@ function createHandOrbits(scene, count) {
 export function createEnergyStreaks(scene) {
   const ribbons = createRibbons(scene);
   const flames = createFlamePool(scene, 1400, false);
-  const embers = createFlamePool(scene, 300, true);
+  const embers = createFlamePool(scene, 500, true);
   const sparkles = createSparkles(scene, 1200);
   const handTrails = [createHandTrail(scene), createHandTrail(scene)];
   const handOrbits = [createHandOrbits(scene, 4), createHandOrbits(scene, 4)];
   const previous = [new THREE.Vector3(), new THREE.Vector3()];
   const center = new THREE.Vector3(), p = new THREE.Vector3(), v = new THREE.Vector3(), move = new THREE.Vector3();
-  let wispRate = 0, emberRate = 0, glintRate = 0, handRate = 0, started = false;
+  let wispRate = 0, emberRate = 0, glintRate = 0, handRate = 0, hazeRate = 0, flareRate = 0, started = false;
 
   function update(active, power, palms, head, facing, now, dt) {
     ribbons.update(active, power, palms, head, facing, now, dt);
@@ -548,6 +548,24 @@ export function createEnergyStreaks(scene) {
           sparkles.emit(o.head, v, 0.4 + Math.random() * 0.5, 0.018 + Math.random() * 0.03, 8 + Math.random() * 14);
         }
       }
+      // Soft golden haze so the whole space around the caster glows.
+      hazeRate += dt * (40 + power * 50);
+      while (hazeRate >= 1) {
+        hazeRate--;
+        const angle = Math.random() * Math.PI * 2, radius = 0.3 + Math.random() * 0.6;
+        p.set(center.x + Math.cos(angle) * radius, head.y - 1.5 + Math.random() * 1.3, center.z + Math.sin(angle) * radius);
+        v.set(0, 0.1 + Math.random() * 0.15, 0);
+        embers.emit(p, v, 1.2 + Math.random() * 0.8, 0.25 + Math.random() * 0.2, 0.12, 0.5);
+      }
+      // Big flashing star flares.
+      flareRate += dt * (12 + power * 20);
+      while (flareRate >= 1) {
+        flareRate--;
+        const angle = Math.random() * Math.PI * 2, radius = 0.35 + Math.random() * 0.6;
+        p.set(center.x + Math.cos(angle) * radius, head.y - 1.3 + Math.random() * 1.1, center.z + Math.sin(angle) * radius);
+        v.set(0, 0.05, 0);
+        sparkles.emit(p, v, 0.5 + Math.random() * 0.4, 0.08 + Math.random() * 0.08, 10 + Math.random() * 8);
+      }
       emberRate += dt * (60 + power * 70);
       while (emberRate >= 1) {
         emberRate--;
@@ -576,7 +594,7 @@ export function createEnergyStreaks(scene) {
     ribbons.reset(); flames.reset(); embers.reset(); sparkles.reset();
     for (const t of handTrails) t.reset();
     for (const o of handOrbits) o.hide();
-    wispRate = emberRate = glintRate = handRate = 0; started = false;
+    wispRate = emberRate = glintRate = handRate = hazeRate = flareRate = 0; started = false;
   }
   return { update, release, reset };
 }
