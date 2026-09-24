@@ -188,7 +188,8 @@ export function createEnergyStreaks(scene) {
   const sparkles = createSparkles(scene, 1800);
   const previous = [new THREE.Vector3(), new THREE.Vector3()];
   const center = new THREE.Vector3(), p = new THREE.Vector3(), v = new THREE.Vector3(), move = new THREE.Vector3();
-  let strength = 0, moteRate = 0, starRate = 0, dustRate = 0, started = false;
+  const mid = new THREE.Vector3(), swirl = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+  let strength = 0, moteRate = 0, starRate = 0, dustRate = 0, streamRate = 0, started = false;
 
   function update(active, power, palms, head, facing, now, dt) {
     strength = THREE.MathUtils.lerp(strength, active ? 0.6 + 0.4 * power : 0, 1 - Math.exp(-dt * (active ? 6 : 4)));
@@ -211,6 +212,19 @@ export function createEnergyStreaks(scene) {
         p.set(center.x + Math.cos(angle) * radius, head.y - 1.5 + Math.random() * 1.4, center.z + Math.sin(angle) * radius);
         v.set(-Math.sin(angle) * 0.25, 0.06, Math.cos(angle) * 0.25);
         sparkles.emit(p, v, 0.6 + Math.random() * 0.7, 0.03 + Math.random() * 0.06 * (0.6 + power), 6 + Math.random() * 12);
+      }
+      // Glittering streams pulled from each palm into the ball between the hands.
+      mid.addVectors(palms[0], palms[1]).multiplyScalar(0.5);
+      streamRate += dt * (500 + power * 500);
+      while (streamRate >= 1) {
+        streamRate--;
+        const side = Math.random() < 0.5 ? 0 : 1, lifetime = 0.28 + Math.random() * 0.22;
+        p.copy(palms[side]).add(v.randomDirection().multiplyScalar(0.03));
+        v.subVectors(mid, p).divideScalar(lifetime);
+        swirl.subVectors(mid, palms[side]).cross(up).normalize().multiplyScalar((Math.random() - 0.5) * 0.9);
+        v.add(swirl);
+        if (Math.random() < 0.3) sparkles.emit(p, v, lifetime, 0.02 + Math.random() * 0.025, 12 + Math.random() * 14);
+        else motes.emit(p, v, lifetime, 0.008 + Math.random() * 0.01, 1, 0);
       }
       // Sparkler dust off each hand; left behind in the air it draws a trail.
       for (let side = 0; side < 2; side++) {
@@ -242,6 +256,6 @@ export function createEnergyStreaks(scene) {
     }
   }
 
-  function reset() { strength = 0; moteRate = starRate = dustRate = 0; started = false; motes.reset(); sparkles.reset(); }
+  function reset() { strength = 0; moteRate = starRate = dustRate = streamRate = 0; started = false; motes.reset(); sparkles.reset(); }
   return { update, release, reset };
 }
