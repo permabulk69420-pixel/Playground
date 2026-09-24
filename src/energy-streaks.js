@@ -4,7 +4,7 @@ import * as THREE from 'three';
 // sampled from the emitter's own path function rather than recorded history,
 // so the curves stay perfectly smooth at any frame rate.
 export function createEnergyStreaks(scene) {
-  const bodyCount = 14, palmCount = 8, count = bodyCount + palmCount, samples = 44;
+  const bodyCount = 22, palmCount = 10, count = bodyCount + palmCount, samples = 48;
   const up = new THREE.Vector3(0, 1, 0), right = new THREE.Vector3(), forward = new THREE.Vector3();
   const axis = new THREE.Vector3(), cross = new THREE.Vector3(), other = new THREE.Vector3();
   const point = new THREE.Vector3(), next = new THREE.Vector3(), dir = new THREE.Vector3();
@@ -46,7 +46,7 @@ export function createEnergyStreaks(scene) {
       varying vec4 vShade; varying float vSide;
       void main() {
         float e = vSide * vSide;
-        float glow = exp(-e * 28.) * 1.1 + exp(-e * 4.) * .3;
+        float glow = exp(-e * 16.) * 1.5 + exp(-e * 2.5) * .55;
         gl_FragColor = vec4(vShade.rgb * glow, vShade.a * glow);
         #include <colorspace_fragment>
       }`
@@ -92,7 +92,7 @@ export function createEnergyStreaks(scene) {
   function update(active, power, palms, head, facing, now, dt) {
     time = now;
     if (active) { storedPower = power; burst = 0; } else burst = Math.min(1, burst + dt * 2.5);
-    strength = THREE.MathUtils.lerp(strength, active ? 0.45 + 0.55 * power : 0, 1 - Math.exp(-dt * (active ? 8 : 5)));
+    strength = THREE.MathUtils.lerp(strength, active ? 0.7 + 0.3 * power : 0, 1 - Math.exp(-dt * (active ? 8 : 5)));
     if (strength < 0.01) { trails.visible = heads.visible = false; return; }
     forward.copy(facing); forward.y = 0;
     if (forward.lengthSq() < 0.001) forward.set(0, 0, -1);
@@ -102,8 +102,8 @@ export function createEnergyStreaks(scene) {
       const e = emitters[i], palm = i >= bodyCount;
       e.phase += dt * e.spin * e.speed * (palm ? 2.6 : 1) * (0.75 + storedPower * 0.8);
       // Trail covers a fixed arc of the orbit behind the head.
-      const arc = (palm ? 2.4 : 1.7) * e.spin;
-      const baseWidth = (palm ? 0.006 : 0.011) * (0.6 + 0.4 * storedPower);
+      const arc = (palm ? 3 : 2.6) * e.spin;
+      const baseWidth = (palm ? 0.012 : 0.026) * (0.65 + 0.35 * storedPower);
       for (let j = 0; j < samples; j++) {
         const t = j / (samples - 1);
         const a = e.phase - arc * t;
@@ -123,7 +123,7 @@ export function createEnergyStreaks(scene) {
         }
         if (j === 0) {
           dummy.position.copy(point);
-          dummy.scale.setScalar((palm ? 0.004 : 0.007) * strength * visible);
+          dummy.scale.setScalar((palm ? 0.007 : 0.013) * strength * visible);
           dummy.updateMatrix();
           heads.setMatrixAt(i, dummy.matrix);
         }
