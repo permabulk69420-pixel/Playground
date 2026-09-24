@@ -157,7 +157,7 @@ export function createMagicBlast({ scene, renderer, camera, rig, hands, collider
     p.velocity.copy(worldDirection).multiplyScalar(11 + shot.charge * 9);
     atmosphere.release(midpoint, worldDirection, shot.charge);
     p.group.position.addScaledVector(worldDirection, 0.08);
-    p.group.scale.setScalar(0.08 + shot.charge * 0.12);
+    p.group.scale.setScalar(0.065 + shot.charge * 0.12);
     p.uniforms.power.value = shot.charge;
     p.group.visible = true;
     pulse(0.5 + shot.charge * 0.45, 110);
@@ -317,7 +317,7 @@ export function createMagicBlast({ scene, renderer, camera, rig, hands, collider
       p.group.rotation.y += dt * 2;
       p.shells[0].rotation.z += dt * 1.1;
       p.shells[1].rotation.y -= dt * 1.5;
-      atmosphere.trail(p.previous, p.group.position, p.velocity, p.power, dt, p, p.group.scale.x);
+      atmosphere.trail(p.previous, p.group.position, p.velocity, p.power, dt, p);
       if (!gesture.active) {
         light.position.copy(p.group.position);
         light.intensity = 4 + p.power * 5;

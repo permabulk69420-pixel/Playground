@@ -34,19 +34,14 @@ export function createPlasmaOrb(texture) {
     fragmentShader: `${NOISE}
       uniform float time; uniform float power; varying vec3 vP; varying vec3 vN; varying vec3 vV;
       void main() {
-        vec3 flow=vP*3.2+vec3(time*.35,-time*1.9,time*.25);
+        vec3 flow=vP*4.+vec3(time*.45,-time*1.7,time*.3);
         float warp=fbm(flow);
-        float n=fbm(flow*1.6+vec3(warp*3.,-warp*2.5,warp));
-        float facing=abs(dot(normalize(vN),normalize(vV)));
-        // Fireballs read hottest through the middle and cool toward the limb;
-        // noise carves darker roiling cells out of that gradient.
-        float heat=clamp(facing*.8+(n-.5)*1.2,0.,1.);
-        vec3 color=mix(vec3(.35,.02,.002),vec3(2.2,.42,.03),smoothstep(.05,.5,heat));
-        color=mix(color,vec3(2.6,1.15,.2),smoothstep(.5,.85,heat));
-        color=mix(color,vec3(3.,2.3,1.1),smoothstep(.88,1.,heat));
-        float fissure=pow(1.-abs(warp*2.-1.),10.);
-        color+=fissure*vec3(1.6,.7,.1)*(1.-heat*.5);
-        gl_FragColor=vec4(color*(.7+power*.25),1.);
+        float n=fbm(flow+vec3(warp*3.,-warp*2.,warp));
+        float fissure=pow(1.-abs(n*2.-1.),9.);
+        float rim=pow(1.-abs(dot(normalize(vN),normalize(vV))),2.);
+        vec3 color=mix(vec3(.3,.008,.001),vec3(1.8,.28,.008),smoothstep(.22,.7,n));
+        color+=fissure*vec3(1.8,.9,.16)+rim*vec3(1.4,.4,.05);
+        gl_FragColor=vec4(color*(.8+power*.35),1.);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`
@@ -61,11 +56,9 @@ export function createPlasmaOrb(texture) {
         uniform float time; uniform float layer; varying vec3 vP; varying vec3 vN; varying vec3 vV;
         void main() {
           vP=position;
-          float n=fbm(position*3.2+vec3(time*.5,-time*3.2,layer*9.));
-          float lift=max(position.y,0.)*.35;
-          float spikes=pow(n,2.)*(.55+lift);
-          vec3 p=position*(1.03+layer*.2+spikes);
-          p.y+=pow(n,3.)*lift*.9;
+          float n=fbm(position*3.7+vec3(time*.7,-time*2.,layer*9.));
+          float spikes=pow(n,2.)*.48;
+          vec3 p=position*(1.02+layer*.18+spikes);
           vec4 view=modelViewMatrix*vec4(p,1.); vV=-view.xyz; vN=normalize(normalMatrix*normal);
           gl_Position=projectionMatrix*view;
         }`,
@@ -78,9 +71,9 @@ export function createPlasmaOrb(texture) {
           float filaments=pow(1.-abs(n*2.-1.),18.);
           float facing=abs(dot(normalize(vN),normalize(vV)));
           float edge=smoothstep(0.,.2,facing);
-          float alpha=(filaments*.35+smoothstep(.45,.8,n)*.3)*edge*(1.-layer*.4);
+          float alpha=(filaments*.28+smoothstep(.58,.8,n)*.16)*edge*(1.-layer*.34);
           if(alpha<.015)discard;
-          vec3 color=mix(vec3(1.4,.12,.004),vec3(2.4,1.1,.2),filaments+smoothstep(.6,.9,n)*.5);
+          vec3 color=mix(vec3(.8,.035,.002),vec3(1.5,.6,.1),filaments);
           gl_FragColor=vec4(color,alpha*(.75+power*.25));
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
@@ -90,8 +83,8 @@ export function createPlasmaOrb(texture) {
   }
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture,
     transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
-    toneMapped: false, opacity: .45 }));
-  glow.scale.set(6, 6, 1); group.add(glow);
+    toneMapped: false, opacity: .42 }));
+  glow.scale.set(7.5, 7.5, 1); group.add(glow);
   group.visible = false;
   return { group, uniforms, glow, shells };
 }
@@ -118,24 +111,14 @@ export function createShockwave() {
   }));
 }
 
-// Camera-facing noise puffs. Fire is additive and cools from white-yellow to
-// red as it ages; smoke is alpha-blended so it can darken the room behind it.
-function makeParticlePool(scene, { count, smoke = false }) {
+function makeFirePool(scene) {
+  const count = 240;
   const geometry = new THREE.PlaneGeometry(1, 1);
   const parameters = new Float32Array(count * 4);
   geometry.setAttribute('aLife', new THREE.InstancedBufferAttribute(parameters, 4).setUsage(THREE.DynamicDrawUsage));
-  const fireColor = `
-        float heat=clamp(density*1.1-age*.85+vLife.w*.25,0.,1.);
-        vec3 color=mix(vec3(.55,.03,.003),vec3(2.,.36,.015),smoothstep(.05,.4,heat));
-        color=mix(color,vec3(2.8,1.35,.3),smoothstep(.4,.8,heat));
-        color=mix(color,vec3(3.2,2.4,1.2),smoothstep(.85,1.,heat));
-        gl_FragColor=vec4(color,a);`;
-  const smokeColor = `
-        vec3 color=mix(vec3(.05,.045,.04),vec3(.16,.14,.13),n);
-        gl_FragColor=vec4(color,a*.55);`;
   const material = new THREE.ShaderMaterial({
     uniforms: { time: { value: 0 } }, transparent: true, depthWrite: false,
-    blending: smoke ? THREE.NormalBlending : THREE.AdditiveBlending,
+    blending: THREE.AdditiveBlending,
     vertexShader: `
       attribute vec4 aLife; varying vec2 vUv; varying vec4 vLife;
       void main(){
@@ -150,26 +133,26 @@ function makeParticlePool(scene, { count, smoke = false }) {
       uniform float time; varying vec2 vUv; varying vec4 vLife;
       void main(){
         vec2 p=vUv*2.-1.; float age=vLife.x; float seed=vLife.y;
-        vec3 flow=vec3(p*2.6+vec2(0.,age*2.5),seed);
-        float n=fbm(flow+vec3(0.,-time*1.2,0.)+fbm(flow*1.7)*.8);
-        float density=1.-length(p)+(n-.5)*.9;
-        float boundary=1.-smoothstep(.7,1.,length(p));
-        float a=smoothstep(.0,.4,density)*boundary*smoothstep(0.,.08,age)*pow(1.-age,${smoke ? '1.1' : '1.6'})*vLife.w;
-        if(a<.008)discard;
-        ${smoke ? smokeColor : fireColor}
+        vec3 flow=vec3(p*3.2+vec2(0.,age*3.),seed);
+        float n=fbm(flow+vec3(0.,-time*.9,0.));
+        float density=1.-length(p*vec2(1.,.87))+(n-.5)*.75;
+        float boundary=1.-smoothstep(.65,1.,length(p));
+        float a=smoothstep(.02,.45,density)*boundary*pow(1.-age,1.4)*vLife.w;
+        if(a<.01)discard;
+        float heat=clamp(density*.9-age*.4,0.,1.);
+        vec3 color=mix(vec3(.75,.018,.001),vec3(2.5,.55,.025),smoothstep(.1,.55,heat));
+        color=mix(color,vec3(3.,2.1,.8),smoothstep(.55,.98,heat));
+        gl_FragColor=vec4(color,a);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`
   });
   const mesh = new THREE.InstancedMesh(geometry, material, count);
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.frustumCulled = false;
-  // Smoke sits behind the flames it rises from.
-  mesh.renderOrder = smoke ? 1 : 2;
   scene.add(mesh);
   const particles = Array.from({length:count},()=>({ life:0, duration:1, size:0, gain:1,
     p:new THREE.Vector3(), v:new THREE.Vector3(), seed:Math.random()*40, spin:0 }));
   const dummy = new THREE.Object3D();
-  const buoyancy = smoke ? .35 : .9, drag = smoke ? 1.6 : 2.4, growth = smoke ? 2.2 : 1.1;
   let cursor = 0;
   function emit(p,v,size,life,gain=1) {
     const f=particles[cursor++%count]; f.p.copy(p); f.v.copy(v);
@@ -180,8 +163,8 @@ function makeParticlePool(scene, { count, smoke = false }) {
     for(let i=0;i<count;i++) {
       const f=particles[i]; f.life=Math.max(0,f.life-dt);
       const age=1-f.life/f.duration;
-      if(f.life>0) { f.p.addScaledVector(f.v,dt); f.v.multiplyScalar(Math.exp(-dt*drag)); f.v.y+=dt*buoyancy; }
-      dummy.position.copy(f.p); dummy.scale.setScalar(f.life>0?f.size*(.6+age*growth):0);
+      if(f.life>0) { f.p.addScaledVector(f.v,dt); f.v.multiplyScalar(Math.exp(-dt*2.)); f.v.y+=dt*.3; }
+      dummy.position.copy(f.p); dummy.scale.setScalar(f.life>0?f.size*(.55+age*1.3):0);
       dummy.updateMatrix(); mesh.setMatrixAt(i,dummy.matrix);
       parameters.set([age,f.seed,f.spin*age+f.seed,f.gain],i*4);
     }
@@ -265,71 +248,51 @@ function makePalmStreams(scene) {
 }
 
 export function createBlastAtmosphere(scene) {
-  const fire=makeParticlePool(scene,{count:700}), smoke=makeParticlePool(scene,{count:260,smoke:true});
-  const streams=makePalmStreams(scene), aura=createEnergyStreaks(scene);
-  const lights=Array.from({length:2},()=>{const light=new THREE.PointLight(0xff7319,0,8,2);scene.add(light);return {light,life:0,power:0};});
-  const p=new THREE.Vector3(),v=new THREE.Vector3(),n=new THREE.Vector3();
+  const fire=makeFirePool(scene), streams=makePalmStreams(scene), aura=createEnergyStreaks(scene);
+  const lights=Array.from({length:2},()=>{const light=new THREE.PointLight(0xff7319,0,6,2);scene.add(light);return {light,life:0,power:0};});
+  const p=new THREE.Vector3(),v=new THREE.Vector3();
   let emission=0;
   function charge(active,palms,center,power,motion,time,dt,radius,head,forward) {
     aura.update(active,power,palms,head,forward,time,dt);
     streams.update(active,palms,center,power,motion,time);
     if(!active){emission=0;return;}
-    // Flames lick off the top of the ball and curl upward.
-    emission+=dt*(18+power*30+motion*20);
+    emission+=dt*(14+power*24+motion*18);
     while(emission>=1){
-      emission--;n.randomDirection();n.y=Math.abs(n.y)*.7+.3;n.normalize();
-      p.copy(center).addScaledVector(n,radius*.75);
-      v.copy(n).multiplyScalar(.08+power*.12);v.y+=.12+power*.15;
-      fire.emit(p,v,radius*(.5+Math.random()*.45),.2+Math.random()*.2,.28+power*.14);
+      emission--;v.randomDirection();p.copy(center).addScaledVector(v,radius*.82);
+      v.multiplyScalar(.025+power*.055);v.y+=.04;
+      fire.emit(p,v,.04+power*.07,.18+Math.random()*.2,.12);
     }
   }
-  function trail(start,end,velocity,power,dt,record,radius) {
-    record.fireEmission=(record.fireEmission||0)+dt*(140+power*110);
+  function trail(start,end,velocity,power,dt,record) {
+    record.fireEmission=(record.fireEmission||0)+dt*(50+power*35);
     while(record.fireEmission>=1){record.fireEmission--;
       p.lerpVectors(start,end,Math.random());
-      v.randomDirection().multiplyScalar(.2+power*.3).addScaledVector(velocity,-.03);
-      fire.emit(p,v,radius*(1.2+Math.random()*.9),.14+Math.random()*.2,.6);
-    }
-    record.smokeEmission=(record.smokeEmission||0)+dt*(35+power*25);
-    while(record.smokeEmission>=1){record.smokeEmission--;
-      p.lerpVectors(start,end,Math.random());
-      v.randomDirection().multiplyScalar(.08).addScaledVector(velocity,-.01);
-      smoke.emit(p,v,radius*(.9+Math.random()*.6),.5+Math.random()*.4,.25);
+      v.randomDirection().multiplyScalar(.16+power*.25).addScaledVector(velocity,-.045);
+      fire.emit(p,v,.10+power*.15,.22+Math.random()*.2,.24);
     }
   }
   function burst(center,power,normal) {
-    for(let i=0;i<70+power*60;i++){
+    for(let i=0;i<32+power*24;i++){
       v.randomDirection();if(normal&&v.dot(normal)<0)v.reflect(normal);
-      const speed=Math.random();
-      p.copy(center).addScaledVector(v,.05);
-      v.multiplyScalar(.6+speed*(2.2+power*3));
-      fire.emit(p,v,(.22+(1-speed)*.3)*(1+power*.9),.4+Math.random()*.6,.9);
-    }
-    for(let i=0;i<24+power*24;i++){
-      v.randomDirection();if(normal&&v.dot(normal)<0)v.reflect(normal);
-      p.copy(center).addScaledVector(v,.15);
-      v.multiplyScalar(.4+Math.random()*(.8+power));v.y+=.25;
-      smoke.emit(p,v,(.35+Math.random()*.3)*(1+power*.8),1.4+Math.random()*1.2,.7);
+      p.copy(center).addScaledVector(v,.035);
+      v.multiplyScalar(.9+Math.random()*(1.7+power*2.5));
+      fire.emit(p,v,.2+Math.random()*(.3+power*.3),.35+Math.random()*.55,.35);
     }
     const flash=lights.find(f=>f.life<=0)||lights[0];
-    flash.life=.7;flash.power=power;flash.light.position.copy(center);
-    if(normal)flash.light.position.addScaledVector(normal,.35);
+    flash.life=.55;flash.power=power;flash.light.position.copy(center);
+    if(normal)flash.light.position.addScaledVector(normal,.28);
   }
   function release(center,dir,power){
     aura.release(power);
-    for(let i=0;i<30;i++){
-      v.randomDirection().multiplyScalar(.6).addScaledVector(dir,1.4);
-      fire.emit(center,v,.05+power*.07,.16+Math.random()*.12,.5);
-    }
-    for(let i=0;i<8;i++){
-      v.randomDirection().multiplyScalar(.15).addScaledVector(dir,.3);
-      smoke.emit(center,v,.06+power*.05,.5+Math.random()*.3,.2);
+    for(let i=0;i<14;i++){
+      v.randomDirection().multiplyScalar(.5).addScaledVector(dir,.8);
+      fire.emit(center,v,.09+power*.12,.16+Math.random()*.12,.2);
     }
   }
   function update(dt,time){
-    fire.update(dt,time);smoke.update(dt,time);
-    for(const f of lights){f.life=Math.max(0,f.life-dt);f.light.intensity=Math.pow(f.life/.7,2)*(20+f.power*40);}
+    fire.update(dt,time);
+    for(const f of lights){f.life=Math.max(0,f.life-dt);f.light.intensity=Math.pow(f.life/.55,2)*(12+f.power*24);}
   }
-  function reset(){fire.reset();smoke.reset();streams.reset();aura.reset();emission=0;for(const f of lights){f.life=0;f.light.intensity=0;}}
+  function reset(){fire.reset();streams.reset();aura.reset();emission=0;for(const f of lights){f.life=0;f.light.intensity=0;}}
   return {charge,trail,burst,release,update,reset};
 }
