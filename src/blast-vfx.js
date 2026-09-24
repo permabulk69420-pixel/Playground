@@ -175,7 +175,7 @@ function makeFirePool(scene) {
 }
 
 function makePalmStreams(scene) {
-  const paths=12, segments=32, vertices=paths*(segments+1)*2;
+  const paths=6, segments=48, vertices=paths*(segments+1)*2;
   const positions=new Float32Array(vertices*3), tangents=new Float32Array(vertices*3);
   const uvs=new Float32Array(vertices*2), weights=new Float32Array(vertices);
   const indices=[];
@@ -205,12 +205,15 @@ function makePalmStreams(scene) {
       uniform float time; uniform float power; uniform float motion; varying vec2 vUv;
       void main(){
         float edge=abs(vUv.x*2.-1.);
-        float core=exp(-edge*edge*36.);
-        float halo=exp(-edge*edge*5.);
-        float flow=pow(.5+.5*sin(vUv.y*36.-time*(18.+motion*26.)),5.);
-        float fade=smoothstep(0.,.09,vUv.y)*(1.-smoothstep(.92,1.,vUv.y));
-        vec3 color=mix(vec3(1.2,.12,.006),vec3(2.6,1.9,.75),core);
-        float alpha=(core*.9+halo*.2)*(0.4+flow*.6)*fade*(.55+motion*.45);
+        float core=exp(-edge*edge*30.);
+        float halo=exp(-edge*edge*3.);
+        // Magical shimmer: bright pulses racing along a soft rose-gold ribbon.
+        float flow=pow(.5+.5*sin(vUv.y*22.-time*(14.+motion*20.)),6.);
+        float twinkle=pow(.5+.5*sin(vUv.y*90.+time*31.),24.);
+        float fade=smoothstep(0.,.12,vUv.y)*(1.-smoothstep(.88,1.,vUv.y));
+        vec3 color=mix(vec3(1.,.42,.55),vec3(1.,.82,.45),smoothstep(.2,.8,vUv.y));
+        color=mix(color,vec3(1.,.97,.9),core*.7+twinkle);
+        float alpha=(core*.8+halo*.35+twinkle*.8)*(0.45+flow*.55)*fade*(.6+motion*.4);
         gl_FragColor=vec4(color,alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -238,7 +241,7 @@ function makePalmStreams(scene) {
         const vi=(path*(segments+1)+i)*2;
         for(let side=0;side<2;side++) {
           p.toArray(positions,(vi+side)*3);dir.toArray(tangents,(vi+side)*3);
-          weights[vi+side]=(.014+power*.014)*(0.6+Math.sin(t*Math.PI)*.4);
+          weights[vi+side]=(.02+power*.012)*(0.6+Math.sin(t*Math.PI)*.4);
         }
       }
     }
