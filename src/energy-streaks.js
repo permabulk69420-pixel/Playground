@@ -250,7 +250,51 @@ export function createEnergyStreaks(scene) {
   const center = new THREE.Vector3(), p = new THREE.Vector3(), v = new THREE.Vector3();
   let wispRate = 0, emberRate = 0;
 
+  const mode = new URLSearchParams(location.search).get('aura');
+  let spiralRate = 0, spiralAngle = 0;
   function update(active, power, palms, head, facing, now, dt) {
+    if (mode) {
+      ribbons.update(false, power, palms, head, facing, now, dt);
+      center.set(head.x, 0, head.z);
+      if (active) {
+        if (mode === 'mist') {
+          emberRate += dt * (90 + power * 90);
+          while (emberRate >= 1) { emberRate--;
+            const angle = Math.random() * Math.PI * 2, radius = 0.35 + Math.random() * 0.6;
+            p.set(center.x + Math.cos(angle) * radius, Math.random() * (head.y - 0.3), center.z + Math.sin(angle) * radius);
+            v.set(0, 0.15 + Math.random() * 0.25, 0);
+            embers.emit(p, v, 1.8 + Math.random(), 0.12 + Math.random() * 0.14, 0.22, 0.6 + Math.random() * 0.5);
+          }
+        } else if (mode === 'spiral') {
+          spiralAngle += dt * 5;
+          spiralRate += dt * (240 + power * 200);
+          while (spiralRate >= 1) { spiralRate--;
+            const arm = Math.floor(Math.random() * 3), angle = spiralAngle + arm * 2.094 + (Math.random() - 0.5) * 0.3;
+            p.set(center.x + Math.cos(angle) * 0.5, 0.05, center.z + Math.sin(angle) * 0.5);
+            v.set(0, 1.1 + power * 0.6, 0);
+            flames.emit(p, v, 1 + Math.random() * 0.3, 0.07 + power * 0.05, 0.45, 2.2);
+          }
+        } else if (mode === 'embers') {
+          emberRate += dt * (80 + power * 80);
+          while (emberRate >= 1) { emberRate--;
+            const angle = Math.random() * Math.PI * 2, radius = 0.4 + Math.random() * 0.8;
+            p.set(center.x + Math.cos(angle) * radius, Math.random() * 0.4, center.z + Math.sin(angle) * radius);
+            v.set(0, 0.5 + Math.random() * 0.9, 0);
+            embers.emit(p, v, 1.5 + Math.random(), 0.01 + Math.random() * 0.012, 1, 0.9 + Math.random());
+          }
+          wispRate += dt * (70 + power * 60);
+          while (wispRate >= 1) { wispRate--;
+            const angle = Math.random() * Math.PI * 2;
+            p.set(center.x + Math.cos(angle) * 0.75, 0.02, center.z + Math.sin(angle) * 0.75);
+            v.set(0, 0.3 + Math.random() * 0.3, 0);
+            flames.emit(p, v, 0.35 + Math.random() * 0.25, 0.06 + power * 0.05, 0.35);
+          }
+        }
+      }
+      flames.update(dt, now, center);
+      embers.update(dt, now, center);
+      return;
+    }
     ribbons.update(active, power, palms, head, facing, now, dt);
     const strength = ribbons.strength;
     center.set(head.x, 0, head.z);
