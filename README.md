@@ -30,8 +30,8 @@ npm run dev
 3. Once the indicator says READY (22%), push **both hands forward together** to launch it. You can keep charging to 100% for a larger, faster blast.
 4. Release A after firing, then hold it again to start the next ball. Releasing without pushing cancels the charge.
 
-The in-world panel shows gesture hints, charge and target hits. Haptics signal charge and release. The charging ball is built from swirling flame particles fed by sparks from your palms. Shots leave a fire and smoke trail and explode into a fireball with sparks and smoke when they hit the room, blocks or rear target. The rear target flashes on a hit.
+While charging, glowing energy ribbons spiral up around your body and coil around your hands, then fly outward when you fire. The in-world panel shows gesture hints, charge and target hits. Haptics signal charge and release. Shots hit the room, blocks and rear target, with sparks and a shockwave. The rear target flashes on a hit.
 
 The desktop **Preview magic blast** button drives the same gesture recognizer with simulated hand motion. It previews the effect; actual Quest gesture comfort still needs a headset check.
 
-`src/blast-gesture.js` contains the thresholds and motion recognition. It uses tracking-space positions and hand movement relative to the headset so joystick movement cannot fire a shot. `src/magic-blast.js` contains input, haptics and collision; `src/fire-vfx.js` contains the flame, smoke and spark particles. `window.playground.magic` exposes the recognizer and shot/hit counts for tuning.
+`src/blast-gesture.js` contains the thresholds and motion recognition. It uses tracking-space positions and hand movement relative to the headset so joystick movement cannot fire a shot. `src/magic-blast.js` contains rendering, input, haptics and collision. `window.playground.magic` exposes the recognizer and shot/hit counts for tuning.
