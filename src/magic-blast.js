@@ -52,6 +52,8 @@ export function createMagicBlast({ scene, renderer, camera, rig, hands, collider
   const bitangent = new THREE.Vector3();
   const direction = new THREE.Vector3();
   const midpoint = new THREE.Vector3();
+  const auraHead = new THREE.Vector3();
+  const auraForward = new THREE.Vector3();
   const palms = [new THREE.Vector3(), new THREE.Vector3()];
   let cursor = 0;
   let emission = 0;
@@ -391,7 +393,13 @@ export function createMagicBlast({ scene, renderer, camera, rig, hands, collider
       if (bucket > lastBucket && bucket > 0) { pulse(0.2 + gesture.charge * 0.3, 55); lastBucket = bucket; }
       else if (gesture.motion > 0.2 && hapticClock <= 0) { pulse(0.06 + gesture.charge * 0.12, 25); hapticClock = 0.14; }
     } else lastBucket = -1;
-    atmosphere.charge(gesture.active, palms, midpoint, gesture.charge, gesture.motion, time, dt, orb.group.scale.x);
+    auraHead.copy(sample.head).applyMatrix4(rig.matrixWorld);
+    // Estimate torso facing from the hands, so looking around does not spin
+    // the surrounding aura with the headset.
+    auraForward.copy(midpoint).sub(auraHead);
+    auraForward.y = 0;
+    if (auraForward.lengthSq() < 0.01) auraForward.set(0, 0, -1).transformDirection(rig.matrixWorld);
+    atmosphere.charge(gesture.active, palms, midpoint, gesture.charge, gesture.motion, time, dt, orb.group.scale.x, auraHead, auraForward);
     updateProjectiles(dt);
     atmosphere.update(dt, time);
     updateParticles(dt);

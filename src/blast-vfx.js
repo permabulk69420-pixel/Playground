@@ -246,12 +246,151 @@ function makePalmStreams(scene) {
   return {update,reset(){mesh.visible=false;}};
 }
 
+function makeCasterAura(scene) {
+  // Short, rising flame sheets around the body and spirals along the arms.
+  // Width is evaluated per eye, so the wisps remain volumetric in stereo.
+  const paths=24, segments=32, vertexCount=paths*(segments+1)*2;
+  const uv=new Float32Array(vertexCount*2), seed=new Float32Array(vertexCount), indices=[];
+  for(let path=0;path<paths;path++)for(let i=0;i<=segments;i++){
+    const at=(path*(segments+1)+i)*2;
+    uv.set([0,i/segments,1,i/segments],at*2);seed[at]=seed[at+1]=path;
+    if(i<segments)indices.push(at,at+1,at+2,at+1,at+3,at+2);
+  }
+  const geometry=new THREE.BufferGeometry();
+  geometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(vertexCount*3),3));
+  geometry.setAttribute('uv',new THREE.BufferAttribute(uv,2));
+  geometry.setAttribute('seed',new THREE.BufferAttribute(seed,1));geometry.setIndex(indices);
+  const uniforms={time:{value:0},strength:{value:0},power:{value:0},flare:{value:0},
+    head:{value:new THREE.Vector3()},bodyRight:{value:new THREE.Vector3(1,0,0)},
+    bodyForward:{value:new THREE.Vector3(0,0,-1)},
+    palmL:{value:new THREE.Vector3()},palmR:{value:new THREE.Vector3()}};
+  const mesh=new THREE.Mesh(geometry,new THREE.ShaderMaterial({
+    uniforms,transparent:true,depthWrite:false,side:THREE.DoubleSide,blending:THREE.AdditiveBlending,
+    vertexShader:`${NOISE}
+      attribute float seed;
+      uniform float time; uniform float power; uniform float flare;
+      uniform vec3 head; uniform vec3 bodyRight; uniform vec3 bodyForward; uniform vec3 palmL; uniform vec3 palmR;
+      varying vec2 vUv; varying float vSeed; varying float vLife; varying vec3 vWorld;
+      vec3 pathAt(float t){
+        if(seed<16.){
+          float cycle=fract(time*(.24+fract(seed*.31)*.13)+seed*.61803);
+          float angle=seed*2.39996+time*.35+t*(.6+power*.8);
+          float radius=.55+fract(seed*.7)*.23+sin(t*6.+seed+time)*.055+flare*(.65+t*.2);
+          float height=max(.25,head.y-1.45)+cycle*1.20+t*.52;
+          return vec3(head.x,height,head.z)+(bodyRight*cos(angle)+bodyForward*sin(angle))*radius;
+        }
+        float side=mod(seed,2.);
+        vec3 palm=mix(palmL,palmR,side);
+        vec3 elbow=head+bodyRight*mix(-.28,.28,side)+bodyForward*.10-vec3(0.,.61,0.);
+        vec3 axis=normalize(palm-elbow);
+        vec3 tangent=cross(axis,vec3(0.,1.,0.));
+        if(length(tangent)<.01)tangent=bodyRight;
+        tangent=normalize(tangent); vec3 bitangent=normalize(cross(axis,tangent));
+        float angle=seed*2.4+t*7.5-time*(2.+power*2.);
+        float radius=.065+sin(t*3.14159)*.025+flare*.15;
+        return mix(elbow,palm,t)+(tangent*cos(angle)+bitangent*sin(angle))*radius;
+      }
+      void main(){
+        vUv=uv;vSeed=seed;
+        float cycle=fract(time*(.24+fract(seed*.31)*.13)+seed*.61803);
+        vLife=seed<16.?smoothstep(0.,.12,cycle)*(1.-smoothstep(.76,1.,cycle)):1.;
+        vec3 p=pathAt(uv.y);vec3 tangent=normalize(pathAt(uv.y+.002)-p);
+        vec3 side=cross(normalize(cameraPosition-p),tangent);
+        if(length(side)<.001)side=bodyRight;
+        side=normalize(side);
+        float taper=pow(max(0.,sin(uv.y*3.14159)),.6);
+        float width=(seed<16.?(.12+power*.09):(.04+power*.035))*taper;
+        p+=side*(uv.x-.5)*width;
+        vWorld=p;
+        gl_Position=projectionMatrix*viewMatrix*vec4(p,1.);
+      }`,
+    fragmentShader:`${NOISE}
+      uniform float time; uniform float strength; uniform float power; uniform float flare; uniform vec3 head;
+      varying vec2 vUv; varying float vSeed; varying float vLife; varying vec3 vWorld;
+      void main(){
+        float edge=abs(vUv.x*2.-1.);
+        float n=fbm(vec3(vUv.x*3.,vUv.y*8.-time*(1.9+power),vSeed*3.7));
+        float turbulence=smoothstep(.25,.72,n);
+        float filament=exp(-pow((edge-(n-.5)*.8)*5.,2.));
+        float soft=pow(max(0.,1.-edge),1.8);
+        float tip=pow(max(0.,sin(vUv.y*3.14159)),.8);
+        float eyeClear=smoothstep(.32,.58,distance(vWorld,head));
+        float alpha=(soft*turbulence*.42+filament*.38)*tip*vLife*strength*eyeClear*.58;
+        if(alpha<.007)discard;
+        vec3 violet=vec3(.22,.055,.9);
+        vec3 gold=vec3(1.25,.38,.045);
+        vec3 color=mix(violet,gold,filament*.82+turbulence*.18);
+        color+=vec3(.38,.23,.09)*filament*power;
+        gl_FragColor=vec4(color,alpha);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`
+  }));
+  mesh.name='caster-flame-aura';mesh.frustumCulled=false;mesh.visible=false;scene.add(mesh);
+
+  // Tiny floating embers rise around the caster, with a soft violet halo.
+  const moteCount=90, moteGeometry=new THREE.PlaneGeometry(1,1);
+  moteGeometry.setAttribute('seed',new THREE.InstancedBufferAttribute(Float32Array.from({length:moteCount},(_,i)=>i),1));
+  const motes=new THREE.InstancedMesh(moteGeometry,new THREE.ShaderMaterial({
+    uniforms,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+    vertexShader:`
+      attribute float seed; uniform float time; uniform float power; uniform float flare;
+      uniform vec3 head; uniform vec3 bodyRight; uniform vec3 bodyForward;
+      varying vec2 vUv; varying float vFade;
+      void main(){
+        vUv=uv;
+        float cycle=fract(seed*.61803+time*(.16+fract(seed*.37)*.17));
+        float angle=seed*2.39996+time*.34+cycle*.8;
+        float radius=.48+fract(seed*.31)*.55+flare*.75;
+        vec3 p=vec3(head.x,max(.15,head.y-1.5)+cycle*1.85,head.z)+(bodyRight*cos(angle)+bodyForward*sin(angle))*radius;
+        vec4 center=viewMatrix*vec4(p,1.);
+        float size=(.009+fract(seed*.19)*.012)*(0.6+power*.7);
+        center.xy+=position.xy*vec2(size,size*1.8);
+        vFade=sin(cycle*3.14159)*(.5+.5*sin(time*4.+seed))*smoothstep(.32,.55,distance(p,head));
+        gl_Position=projectionMatrix*center;
+      }`,
+    fragmentShader:`
+      uniform float strength; varying vec2 vUv; varying float vFade;
+      void main(){
+        float r=length(vUv*2.-1.);
+        float halo=exp(-r*r*5.);float core=exp(-r*r*28.);
+        float a=(halo*.35+core)*vFade*strength*(1.-smoothstep(.65,1.,r));
+        if(a<.01)discard;
+        gl_FragColor=vec4(mix(vec3(.35,.1,.9),vec3(1.8,1.1,.36),core),a);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`
+  }),moteCount);
+  // Shader supplies each mote's world position; instance transforms stay identity.
+  const matrix=new THREE.Matrix4();for(let i=0;i<moteCount;i++)motes.setMatrixAt(i,matrix);
+  motes.name='caster-aura-embers';motes.frustumCulled=false;motes.visible=false;scene.add(motes);
+  let strength=0,releaseTime=0,lastPower=0,released=false;
+  function update(active,power,palms,head,forward,time,dt){
+    if(active){lastPower=power;released=false;}
+    releaseTime=Math.max(0,releaseTime-dt);
+    const target=active ? .23+power*.77 : 0;
+    strength=THREE.MathUtils.lerp(strength,target,1-Math.exp(-dt*(active?8:5)));
+    const flare=released ? 1-releaseTime/.55 : 0;
+    uniforms.time.value=time;uniforms.strength.value=strength+(releaseTime/.55)*.4;
+    uniforms.power.value=lastPower;uniforms.flare.value=flare;
+    uniforms.head.value.copy(head);uniforms.palmL.value.copy(palms[0]);uniforms.palmR.value.copy(palms[1]);
+    uniforms.bodyForward.value.copy(forward);uniforms.bodyForward.value.y=0;
+    if(uniforms.bodyForward.value.lengthSq()<.001)uniforms.bodyForward.value.set(0,0,-1);
+    uniforms.bodyForward.value.normalize();uniforms.bodyRight.value.crossVectors(uniforms.bodyForward.value,up).normalize();
+    mesh.visible=motes.visible=uniforms.strength.value>.012;
+  }
+  function release(power){releaseTime=.55;lastPower=power;released=true;}
+  function reset(){strength=releaseTime=0;released=false;uniforms.strength.value=0;mesh.visible=motes.visible=false;}
+  return {update,release,reset};
+}
+
 export function createBlastAtmosphere(scene) {
-  const fire=makeFirePool(scene), streams=makePalmStreams(scene);
+  const fire=makeFirePool(scene), streams=makePalmStreams(scene), aura=makeCasterAura(scene);
   const lights=Array.from({length:2},()=>{const light=new THREE.PointLight(0xff7319,0,6,2);scene.add(light);return {light,life:0,power:0};});
   const p=new THREE.Vector3(),v=new THREE.Vector3();
   let emission=0;
-  function charge(active,palms,center,power,motion,time,dt,radius) {
+  function charge(active,palms,center,power,motion,time,dt,radius,head,forward) {
+    aura.update(active,power,palms,head,forward,time,dt);
     streams.update(active,palms,center,power,motion,time);
     if(!active){emission=0;return;}
     emission+=dt*(14+power*24+motion*18);
@@ -281,6 +420,7 @@ export function createBlastAtmosphere(scene) {
     if(normal)flash.light.position.addScaledVector(normal,.28);
   }
   function release(center,dir,power){
+    aura.release(power);
     for(let i=0;i<14;i++){
       v.randomDirection().multiplyScalar(.5).addScaledVector(dir,.8);
       fire.emit(center,v,.09+power*.12,.16+Math.random()*.12,.2);
@@ -290,6 +430,6 @@ export function createBlastAtmosphere(scene) {
     fire.update(dt,time);
     for(const f of lights){f.life=Math.max(0,f.life-dt);f.light.intensity=Math.pow(f.life/.55,2)*(12+f.power*24);}
   }
-  function reset(){fire.reset();streams.reset();emission=0;for(const f of lights){f.life=0;f.light.intensity=0;}}
+  function reset(){fire.reset();streams.reset();aura.reset();emission=0;for(const f of lights){f.life=0;f.light.intensity=0;}}
   return {charge,trail,burst,release,update,reset};
 }
