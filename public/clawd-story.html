@@ -1,0 +1,2580 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0a1c">
+<title>Clawd and the Little Star</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0a1c; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden; cursor: pointer;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none; user-select: none;
+  }
+  .backdrop { position: fixed; left: 0; right: 0; height: 50%; z-index: 0; transition: background-color .6s ease; background: #0b0a1c; }
+  #backTop { top: 0; }
+  #backBottom { bottom: 0; }
+  canvas {
+    position: relative; z-index: 1;
+    display: block;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
+  }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div id="backTop" class="backdrop"></div>
+<div id="backBottom" class="backdrop"></div>
+<canvas id="screen" width="96" height="120" role="img" aria-label="Clawd and the Little Star: a pixel-art animated story. Tap or press space to skip to the next scene."></canvas>
+<div id="captions" class="sr" aria-live="polite"></div>
+<script>
+"use strict";
+/* =====================================================================
+   CLAWD AND THE LITTLE STAR
+   A tiny pixel-art story. Everything is drawn into a 96x120 software
+   framebuffer and scaled up with image-rendering: pixelated.
+   ===================================================================== */
+
+// ---------------------------------------------------------------- screen
+const W = 96, H = 120;
+const canvas = document.getElementById('screen');
+const ctx = canvas.getContext('2d');
+const IMG = ctx.createImageData(W, H);
+const FB = new Uint32Array(IMG.data.buffer);   // ABGR on little-endian
+
+// ---------------------------------------------------------------- palette
+const PAL = {
+  ink: '#1d1128', white: '#ffffff', black: '#05040c',
+  // Clawd
+  cl0: '#8a3a2a', cl1: '#b5553b', cl2: '#d97757', cl3: '#ec9a74', cl4: '#fbc6a2',
+  blush: '#ff8aa6', mouth: '#5b1730', tongue: '#e8526a', tear: '#7fd0ff', glint: '#bfeaff',
+  // the little star
+  st0: '#c9701c', st1: '#f5a83a', st2: '#ffd650', st3: '#fff09a', st4: '#fffbe0',
+  dm0: '#5a5476', dm1: '#7c7598', dm2: '#a29bbc', dm3: '#c7c1da', dm4: '#e6e2f0',
+  // night sky
+  n0: '#070716', n1: '#0c0c24', n2: '#121436', n3: '#1a1c4a', n4: '#23265e',
+  n5: '#2f2f72', n6: '#403a84', n7: '#574491', n8: '#744e9b',
+  // dawn
+  d0: '#96599f', d1: '#c06a9e', d2: '#e27f98', d3: '#f7a08e', d4: '#ffc38a', d5: '#ffe0a0',
+  // hills (night)
+  h0: '#0a0f22', h1: '#0f1830', h2: '#14223d', h3: '#1a2e4a', h4: '#213c56',
+  h5: '#28505e', h6: '#2f6563', h7: '#3d7d68', h8: '#5a9a6e',
+  // far mountains
+  mt1: '#252a5c', mt2: '#303872', mt3: '#454c8e',
+  // forest
+  f0: '#060a18', f1: '#0b1224', f2: '#101b33', f3: '#162642', f4: '#1e3352', f5: '#28435f',
+  tr0: '#140e1c', tr1: '#221726', tr2: '#33222f',
+  mu0: '#e0507f', mu1: '#ff86ad', mu2: '#ffc4d8', mug: '#63f0d8', mus: '#d8d0e6',
+  // moon
+  mo0: '#fff8e3', mo1: '#f4e2b2', mo2: '#dcc38e', mo3: '#c4a877',
+  // hologram / code
+  hz0: '#081226', hz1: '#10305a', hz2: '#2a7fc0', hz3: '#58d0ff', hz4: '#b8f2ff',
+  cRed: '#ff6b7f', cYel: '#ffd35c', cGrn: '#6ef08a', cPur: '#c79bff', cOra: '#ff9d5c',
+  // text
+  tx: '#fff4e6', txDim: '#9c8fc4',
+  // leaf
+  lf0: '#123a2a', lf1: '#1f5a36', lf2: '#2f8243', lf3: '#56b057', lf4: '#9ade74', stem: '#6b4e33',
+  // rain & clouds
+  rn0: '#5e7fc8', rn1: '#9dbdf2', rn2: '#d6e6ff',
+  cd0: '#171b38', cd1: '#20264a', cd2: '#2c345e', cd3: '#3f4a7c', cd4: '#6b77a8',
+  // laptop
+  lp0: '#262a40', lp1: '#3e4466', lp2: '#646d98', lp3: '#9aa3cc', lp4: '#cfd5ef',
+  // hearts, fireflies, petals, dust, wood
+  ht0: '#c9304f', ht1: '#ff5a7a', ht2: '#ffb3c4',
+  ff0: '#c8ff6a', ff1: '#f6ffc4',
+  pk0: '#ff9ec6', pk1: '#ffd3e6',
+  du1: '#8f86a8',
+  wd0: '#2a1a1f', wd1: '#4a2f2c', wd2: '#6d4636', wd3: '#94623f', wd4: '#c48a55',
+  sun: '#fff1b8',
+};
+const C = {};
+for (const k in PAL) C[k] = hex(PAL[k]);
+
+function hex(h) {
+  const n = parseInt(h.slice(1), 16);
+  return (0xff000000 | (n & 255) << 16 | (n & 0xff00) | (n >> 16 & 255)) >>> 0;
+}
+const cR = c => c & 255, cG = c => c >>> 8 & 255, cB = c => c >>> 16 & 255;
+function rgb(r, g, b) {
+  r = r < 0 ? 0 : r > 255 ? 255 : r; g = g < 0 ? 0 : g > 255 ? 255 : g; b = b < 0 ? 0 : b > 255 ? 255 : b;
+  return (0xff000000 | (b & 255) << 16 | (g & 255) << 8 | (r & 255)) >>> 0;
+}
+function mix(a, b, t) {
+  return rgb(cR(a) + (cR(b) - cR(a)) * t, cG(a) + (cG(b) - cG(a)) * t, cB(a) + (cB(b) - cB(a)) * t);
+}
+
+// ---------------------------------------------------------------- math
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const prog = (t, a, b) => clamp((t - a) / (b - a), 0, 1);
+const TAU = Math.PI * 2;
+const E = {
+  inOut: t => t < .5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2,
+  out: t => 1 - (1 - t) ** 3,
+  in: t => t * t * t,
+  back: t => { const c = 1.70158; return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2; },
+  bounce: t => {
+    const n = 7.5625, d = 2.75;
+    if (t < 1 / d) return n * t * t;
+    if (t < 2 / d) return n * (t -= 1.5 / d) * t + .75;
+    if (t < 2.5 / d) return n * (t -= 2.25 / d) * t + .9375;
+    return n * (t -= 2.625 / d) * t + .984375;
+  },
+};
+function mulberry(seed) {
+  return function () {
+    seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+let rnd = mulberry(7);
+const rr = (a, b) => a + (b - a) * rnd();
+const pick = arr => arr[Math.floor(rnd() * arr.length)];
+
+// 4x4 ordered dither thresholds
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => (v + .5) / 16);
+const bay = (x, y) => BAYER[(y & 3) << 2 | (x & 3)];
+
+// ---------------------------------------------------------------- drawing primitives
+// Everything draws into the current target (the screen, or an offscreen layer).
+let TB = FB, TW = W, TH = H;
+function target(L) { if (L) { TB = L.buf; TW = L.w; TH = L.h; } else { TB = FB; TW = W; TH = H; } }
+
+function pset(x, y, c) {
+  x = Math.floor(x); y = Math.floor(y);
+  if (x >= 0 && y >= 0 && x < TW && y < TH) TB[y * TW + x] = c;
+}
+function rect(x, y, w, h, c) {
+  x = Math.round(x); y = Math.round(y);
+  const x0 = Math.max(0, x), x1 = Math.min(TW, x + w), y0 = Math.max(0, y), y1 = Math.min(TH, y + h);
+  if (x1 <= x0) return;
+  for (let j = y0; j < y1; j++) TB.fill(c, j * TW + x0, j * TW + x1);
+}
+// dithered rectangle: only pixels whose threshold is below `a` are painted
+function drect(x, y, w, h, c, a) {
+  x = Math.round(x); y = Math.round(y);
+  const x0 = Math.max(0, x), x1 = Math.min(TW, x + w), y0 = Math.max(0, y), y1 = Math.min(TH, y + h);
+  for (let j = y0; j < y1; j++) for (let i = x0; i < x1; i++) if (bay(i, j) < a) TB[j * TW + i] = c;
+}
+function blendAt(i, c, a) {
+  const d = TB[i];
+  TB[i] = rgb(cR(d) + (cR(c) - cR(d)) * a, cG(d) + (cG(c) - cG(d)) * a, cB(d) + (cB(c) - cB(d)) * a);
+}
+function brect(x, y, w, h, c, a) {
+  x = Math.round(x); y = Math.round(y);
+  const x0 = Math.max(0, x), x1 = Math.min(TW, x + w), y0 = Math.max(0, y), y1 = Math.min(TH, y + h);
+  for (let j = y0; j < y1; j++) for (let i = x0; i < x1; i++) blendAt(j * TW + i, c, a);
+}
+function addAt(i, r, g, b) {
+  const d = TB[i];
+  TB[i] = rgb(cR(d) + r, cG(d) + g, cB(d) + b);
+}
+function addPx(x, y, c, k = 1) {
+  x = Math.floor(x); y = Math.floor(y);
+  if (x >= 0 && y >= 0 && x < TW && y < TH) addAt(y * TW + x, cR(c) * k, cG(c) * k, cB(c) * k);
+}
+// soft light, quantised into a few dithered bands so it still reads as pixel art
+function glow(cx, cy, rad, c, k = 1, steps = 4, dither = true) {
+  if (rad <= 0 || k <= 0) return;
+  const r = cR(c), g = cG(c), b = cB(c), r2 = rad * rad;
+  const x0 = Math.max(0, Math.floor(cx - rad)), x1 = Math.min(TW - 1, Math.ceil(cx + rad));
+  const y0 = Math.max(0, Math.floor(cy - rad)), y1 = Math.min(TH - 1, Math.ceil(cy + rad));
+  for (let y = y0; y <= y1; y++) {
+    const dy = y + .5 - cy;
+    for (let x = x0; x <= x1; x++) {
+      const dx = x + .5 - cx, d2 = (dx * dx + dy * dy) / r2;
+      if (d2 >= 1) continue;
+      const f = (1 - d2) * (1 - d2) * k;
+      const q = Math.floor(f * steps + (dither ? bay(x, y) : .5)) / steps;
+      if (q > 0) addAt(y * TW + x, r * q, g * q, b * q);
+    }
+  }
+}
+function line(x0, y0, x1, y1, c) {
+  x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+  const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let e = dx + dy;
+  for (let n = 0; n < 600; n++) {
+    pset(x0, y0, c);
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * e;
+    if (e2 >= dy) { e += dy; x0 += sx; }
+    if (e2 <= dx) { e += dx; y0 += sy; }
+  }
+}
+function lineAdd(x0, y0, x1, y1, c, k) {
+  const n = Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1));
+  for (let i = 0; i <= n; i++) addPx(Math.round(lerp(x0, x1, i / n)), Math.round(lerp(y0, y1, i / n)), c, k);
+}
+function disc(cx, cy, r, c) {
+  for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++) {
+    const dy = y + .5 - cy, hw = r * r - dy * dy;
+    if (hw < 0) continue;
+    const s = Math.sqrt(hw);
+    const x0 = Math.round(cx - s), x1 = Math.round(cx + s);
+    if (y >= 0 && y < TH) rect(x0, y, x1 - x0, 1, c);
+  }
+}
+function ring(cx, cy, rx, ry, c) {
+  const n = Math.max(12, Math.ceil(Math.max(rx, ry) * 7));
+  for (let i = 0; i < n; i++) { const a = i / n * TAU; pset(cx + Math.cos(a) * rx, cy + Math.sin(a) * ry, c); }
+}
+function ellipseD(cx, cy, rx, ry, c, a) {    // dithered ellipse (soft shadows)
+  for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++) for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
+    const dx = (x + .5 - cx) / rx, dy = (y + .5 - cy) / ry;
+    const d = dx * dx + dy * dy;
+    if (d < 1 && bay(x, y) < a * (1 - d * .6) && x >= 0 && y >= 0 && x < TW && y < TH) TB[y * TW + x] = c;
+  }
+}
+// cheap deterministic hash for textures
+function hash2(x, y) {
+  let h = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) | 0;
+  h = Math.imul(h ^ h >>> 13, 1274126177);
+  return ((h ^ h >>> 16) >>> 0) / 4294967296;
+}
+
+// ---------------------------------------------------------------- sprites
+// Sprites are hand-coded as arrays of strings, one character per pixel.
+// '.' is transparent; every other character is looked up in a small key.
+const KEY = {
+  clawd: { o: 'ink', 0: 'cl0', 1: 'cl1', 2: 'cl2', 3: 'cl3', 4: 'cl4', w: 'white' },
+  face: { k: 'ink', w: 'white', b: 'glint', p: 'blush', m: 'mouth', r: 'tongue', t: 'tear', h: 'ht1', 2: 'cl2', 3: 'cl3' },
+  star: { o: 'ink', 0: 'st0', 1: 'st1', 2: 'st2', 3: 'st3', 4: 'st4' },
+  dim: { o: 'ink', 0: 'dm0', 1: 'dm1', 2: 'dm2', 3: 'dm3', 4: 'dm4' },
+  sface: { k: 'ink', p: 'blush', m: 'mouth', r: 'tongue', t: 'tear', w: 'white' },
+  icon: { o: 'ink', w: 'white', y: 'st3', Y: 'st2', r: 'ht1', R: 'ht0', l: 'ht2', b: 'tear', B: 'glint', g: 'cGrn', m: 'mouth', c: 'hz3' },
+  prop: {
+    o: 'ink', a: 'lp0', b: 'lp1', c: 'lp2', d: 'lp3', e: 'lp4', s: 'cl2', S: 'cl4',
+    1: 'lf1', 2: 'lf2', 3: 'lf3', 4: 'lf4', 0: 'lf0', t: 'stem',
+    u: 'wd1', v: 'wd2', x: 'wd3', z: 'wd4', q: 'wd0',
+    m: 'mu0', n: 'mu1', N: 'mu2', i: 'mus', w: 'white',
+  },
+  moon: { a: 'mo0', b: 'mo1', c: 'mo2', d: 'mo3' },
+  logo: { o: 'ink', 1: 'cl1', 2: 'cl2', 3: 'cl3', 4: 'cl4', w: 'white', 0: 'cl0' },
+};
+function spr(rows, key) {
+  const h = rows.length, w = rows[0].length;
+  const px = new Uint32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    if (rows[y].length !== w) throw new Error('ragged sprite row ' + y + ': ' + rows[y]);
+    for (let x = 0; x < w; x++) {
+      const ch = rows[y][x];
+      if (ch === '.') continue;
+      const name = key[ch];
+      if (!name) throw new Error('no colour for "' + ch + '"');
+      px[y * w + x] = C[name];
+    }
+  }
+  return { w, h, px, rows };
+}
+// blit with optional mirror, solid colour (silhouette / flash) and dithered alpha
+function blit(s, x, y, flip = false, solid = 0, alpha = 1) {
+  x = Math.round(x); y = Math.round(y);
+  for (let j = 0; j < s.h; j++) {
+    const yy = y + j;
+    if (yy < 0 || yy >= TH) continue;
+    for (let i = 0; i < s.w; i++) {
+      const xx = x + i;
+      if (xx < 0 || xx >= TW) continue;
+      const c = s.px[j * s.w + (flip ? s.w - 1 - i : i)];
+      if (!c) continue;
+      if (alpha < 1 && bay(xx, yy) >= alpha) continue;
+      TB[yy * TW + xx] = solid || c;
+    }
+  }
+}
+
+// ---------------------------------------------------------------- Clawd
+// Clawd is a paper doll: a body, four legs, two arms and a face, all
+// hand-pixelled. The body is squashed and stretched by duplicating or
+// removing interior rows/columns, so outlines stay crisp at every size.
+const CLAWD_BODY = [
+  '..oooooooooooooo..',
+  '.o34443333333332o.',
+  'o3w32222222222221o',
+  'o3322222222222221o',
+  'o3222222222222221o',
+  'o3222222222222221o',
+  'o3222222222222221o',
+  'o3222222222222221o',
+  'o3222222222222211o',
+  'o2211111111111110o',
+  '.o11111111111100o.',
+  '..oooooooooooooo..',
+];
+// legs by length (the first row overlaps the body's bottom outline)
+const CLAWD_LEGS = [
+  null,
+  spr(['o11o', '.oo.'], KEY.clawd),
+  spr(['o21o', 'o11o', '.oo.'], KEY.clawd),
+  spr(['o21o', 'o21o', 'o11o', '.oo.'], KEY.clawd),
+  spr(['o21o', 'o21o', 'o21o', 'o11o', '.oo.'], KEY.clawd),
+];
+// right arm poses; the left arm is mirrored. [rows, anchorX, anchorY] where the
+// anchor pixel sits on the body's side outline, 5 rows below the top.
+const ARM_DEF = {
+  rest: [['oo.', '22o', '11o', 'oo.'], 0, 0],
+  down: [['o..', '2o.', '22o', '11o', 'oo.'], 0, 0],
+  out: [['ooo.', '222o', '111o', 'ooo.'], 0, 0],
+  up: [['..oo.', '.o32o', 'o221o', '221o.', '21o..', 'oo...'], 0, 3],
+  high: [['.oo.', 'o32o', 'o22o', 'o21o', '221o', '21o.', 'oo..'], 0, 5],
+};
+const ARMS = {};
+for (const k in ARM_DEF) ARMS[k] = { s: spr(ARM_DEF[k][0], KEY.clawd), ax: ARM_DEF[k][1], ay: ARM_DEF[k][2] };
+
+// faces: 14x6 overlays laid over the body (masked to the body's fill)
+const FACE_DEF = {
+  normal: [
+    '..............',
+    '..wk......wk..',
+    '..kk......kk..',
+    '..kk......kk..',
+    '..............',
+    '..............'],
+  blink: [
+    '..............',
+    '..............',
+    '..............',
+    '..kk......kk..',
+    '..............',
+    '..............'],
+  happy: [
+    '..............',
+    '..kk......kk..',
+    '.k..k....k..k.',
+    '..............',
+    '.pp........pp.',
+    '..............'],
+  joy: [
+    '..............',
+    '..kk......kk..',
+    '.k..k....k..k.',
+    '..............',
+    '.pp..mrrm..pp.',
+    '......mm......'],
+  smile: [
+    '..............',
+    '..wk......wk..',
+    '..kk......kk..',
+    '..kk......kk..',
+    '.pp..m..m..pp.',
+    '......mm......'],
+  content: [
+    '..............',
+    '..............',
+    '.k..k....k..k.',
+    '..kk......kk..',
+    '.pp........pp.',
+    '..............'],
+  surprised: [
+    '..wk......wk..',
+    '..kk......kk..',
+    '..kk......kk..',
+    '..kk......kk..',
+    '......mm......',
+    '......mm......'],
+  sparkle: [
+    '..............',
+    '..wk......wk..',
+    '..kk......kk..',
+    '..kb......kb..',
+    '.pp........pp.',
+    '..............'],
+  determined: [
+    '..............',
+    '..k........k..',
+    '..kk......kk..',
+    '..kw......wk..',
+    '..............',
+    '..............'],
+  sad: [
+    '..............',
+    '...k......k...',
+    '..kk......kk..',
+    '..kb......bk..',
+    '..t........t..',
+    '......mm......'],
+  teary: [
+    '..............',
+    '..wk......wk..',
+    '..kk......kk..',
+    '..bb......bb..',
+    '.pp........pp.',
+    '......mm......'],
+  cry: [
+    '..............',
+    '.kk........kk.',
+    '...k......k...',
+    '.kk........kk.',
+    '..............',
+    '.....mrrm.....'],
+  squint: [
+    '..............',
+    '.kk........kk.',
+    '...k......k...',
+    '.kk........kk.',
+    '..............',
+    '......mm......'],
+  worried: [
+    '..............',
+    '..wk......wk..',
+    '..kk......kk..',
+    '..kk......kk..',
+    '.....m.m......',
+    '......m.m.....'],
+  yawn: [
+    '..............',
+    '..............',
+    '.kkk......kkk.',
+    '..............',
+    '.....mmmm.....',
+    '.....mrrm.....'],
+  wink: [
+    '..............',
+    '..wk......kk..',
+    '..kk.....k..k.',
+    '..kk..........',
+    '.pp..m..m..pp.',
+    '......mm......'],
+  love: [
+    '..............',
+    '.h.h......h.h.',
+    '.hhh......hhh.',
+    '..h........h..',
+    '.pp........pp.',
+    '..............'],
+  flustered: [
+    '..............',
+    '..wk......wk..',
+    '..kk......kk..',
+    '..kk......kk..',
+    'ppp..m.m...ppp',
+    '......m.m.....'],
+};
+const FACES = {};
+for (const k in FACE_DEF) FACES[k] = spr(FACE_DEF[k], KEY.face);
+
+// squash / stretch variants of the body, cached by (dw, dh)
+const BODY_CACHE = {};
+function bodyVariant(dw, dh) {
+  const key = dw + ',' + dh;
+  if (BODY_CACHE[key]) return BODY_CACHE[key];
+  const src = CLAWD_BODY, bw = src[0].length, bh = src.length;
+  let cols = [...Array(bw).keys()], rows = [...Array(bh).keys()];
+  if (dw > 0) {
+    const ins = []; for (let i = 0; i < dw; i++) ins.push(i % 2 ? 9 : 8);
+    cols = [...cols.slice(0, 9), ...ins, ...cols.slice(9)];
+  } else if (dw < 0) {
+    const rm = [8, 9, 7, 10].slice(0, -dw); cols = cols.filter(c => !rm.includes(c));
+  }
+  if (dh > 0) rows = [...rows.slice(0, 8), ...Array(dh).fill(7), ...rows.slice(8)];
+  else if (dh < 0) { const rm = [8, 9, 7].slice(0, -dh); rows = rows.filter(r => !rm.includes(r)); }
+  const out = rows.map(r => cols.map(c => src[r][c]).join(''));
+  const s = spr(out, KEY.clawd);
+  s.fill = new Uint8Array(s.w * s.h);
+  for (let y = 0; y < s.h; y++) for (let x = 0; x < s.w; x++) { const ch = out[y][x]; s.fill[y * s.w + x] = ch !== '.' && ch !== 'o' ? 1 : 0; }
+  return (BODY_CACHE[key] = s);
+}
+
+// draw Clawd. c = { x, y (ground under his feet), sq (-1 squash .. +1 stretch),
+//   legs [4 lengths], armL, armR, armLy, armRy, face, lx, ly (look), sit, bob,
+//   shx (tremble), tint [colour, amount], solid, alpha }
+function drawClawd(c) {
+  const dh = clamp(Math.round(c.sq * 3), -3, 4);
+  const dw = clamp(Math.round(-c.sq * 3.4), -3, 4);
+  const b = bodyVariant(dw, dh);
+  const bottom = Math.round(c.y) - (c.sit ? 1 : 3) + (c.bob | 0);
+  const top = bottom - (b.h - 1);
+  const left = Math.round(c.x - b.w / 2) + (c.shx | 0);
+  const solid = c.solid || 0, alpha = c.alpha == null ? 1 : c.alpha;
+  blit(b, left, top, false, solid, alpha);
+  // face, masked to the body's fill pixels
+  if (!solid) {
+    const f = FACES[c.face] || FACES.normal;
+    const fx = left + Math.round((b.w - 14) / 2) + (c.lx | 0), fy = top + 2 + (c.ly | 0);
+    for (let j = 0; j < f.h; j++) for (let i = 0; i < f.w; i++) {
+      const col = f.px[j * f.w + i];
+      if (!col) continue;
+      const bx = fx + i - left, by = fy + j - top;
+      if (bx < 0 || by < 0 || bx >= b.w || by >= b.h || !b.fill[by * b.w + bx]) continue;
+      const X = fx + i, Y = fy + j;
+      if (X < 0 || Y < 0 || X >= TW || Y >= TH) continue;
+      if (alpha < 1 && bay(X, Y) >= alpha) continue;
+      TB[Y * TW + X] = col;
+    }
+  }
+  if (c.tint && !solid) {
+    const tc = c.tint[0], ta = c.tint[1];
+    for (let j = 0; j < b.h; j++) {
+      const a = ta * clamp((j - 1) / (b.h - 2), .25, 1), Y = top + j;
+      if (Y < 0 || Y >= TH) continue;
+      for (let i = 0; i < b.w; i++) {
+        const X = left + i;
+        if (X >= 0 && X < TW && b.fill[j * b.w + i]) blendAt(Y * TW + X, tc, a);
+      }
+    }
+  }
+  // legs
+  const legX = [1, 4, b.w - 8, b.w - 5];
+  const legs = c.legs || [3, 3, 3, 3];
+  for (let i = 0; i < 4; i++) {
+    const L = CLAWD_LEGS[legs[i]];
+    if (L) blit(L, left + legX[i], bottom, false, solid, alpha);
+  }
+  // arms
+  const ar = ARMS[c.armR || 'rest'], al = ARMS[c.armL || 'rest'];
+  if (ar) blit(ar.s, left + b.w - 1 - ar.ax, top + 5 - ar.ay + (c.armRy | 0), false, solid, alpha);
+  if (al) blit(al.s, left - (al.s.w - 1 - al.ax), top + 5 - al.ay + (c.armLy | 0), true, solid, alpha);
+  return { left, top, w: b.w, h: b.h, bottom };
+}
+
+// ---------------------------------------------------------------- the little star
+const STAR_BODY = [
+  '......o......',
+  '.....o4o.....',
+  '....o342o....',
+  '.ooo33222ooo.',
+  'o33333222221o',
+  'o33222222211o',
+  '.o222222221o.',
+  '..o2222221o..',
+  '..o2222211o..',
+  '.o2221o1111o.',
+  '.o221o.o111o.',
+  '.o21o...o10o.',
+  '..oo.....oo..',
+];
+// the same star with its top point snapped off
+const STAR_BROKEN = [
+  '.............',
+  '.............',
+  '.....o.o.....',
+  '.oooo3o2oooo.',
+  'o33333222221o',
+  'o33222222211o',
+  '.o222222221o.',
+  '..o2222221o..',
+  '..o2222211o..',
+  '.o2221o1111o.',
+  '.o221o.o111o.',
+  '.o21o...o10o.',
+  '..oo.....oo..',
+];
+// the snapped-off point lying on the ground
+const STAR_SHARD = [
+  '..o..',
+  '.o4o.',
+  'o342o',
+  'o2o1o',
+  '.o.o.',
+];
+// pixels that differ between broken and whole, bottom-up: the order the fix rebuilds them
+const STAR_FIX = [];
+for (let y = STAR_BODY.length - 1; y >= 0; y--) for (let x = 0; x < 13; x++)
+  if (STAR_BODY[y][x] !== STAR_BROKEN[y][x]) STAR_FIX.push([x, y, STAR_BODY[y][x]]);
+const STAR_FACE_DEF = {
+  normal: ['.........', '..k...k..', '..k...k..', '.p..m..p.'],
+  happy: ['..k...k..', '.k.k.k.k.', '.........', '.p.mrm.p.'],
+  joy: ['..k...k..', '.k.k.k.k.', '...mmm...', '.p..r..p.'],
+  sad: ['.........', '..k...k..', '..t...t..', '.p..m..p.'],
+  cry: ['.k.....k.', '..k...k..', '.k.....k.', '...mmm...'],
+  closed: ['.........', '.........', '.kk...kk.', '.p..m..p.'],
+  scared: ['..k...k..', '..k...k..', '..k...k..', '...m.m...'],
+  wow: ['..k...k..', '..k...k..', '..k...k..', '.p..m..p.'],
+};
+const STAR_FACES = {};
+for (const k in STAR_FACE_DEF) STAR_FACES[k] = spr(STAR_FACE_DEF[k], KEY.sface);
+const STARS = {
+  whole: spr(STAR_BODY, KEY.star), broken: spr(STAR_BROKEN, KEY.star),
+  wholeDim: spr(STAR_BODY, KEY.dim), brokenDim: spr(STAR_BROKEN, KEY.dim),
+  shard: spr(STAR_SHARD, KEY.star), shardDim: spr(STAR_SHARD, KEY.dim),
+};
+
+// ---------------------------------------------------------------- icons & emotes
+const ICON = {
+  bang: spr([
+    '.ooo.',
+    'oyyyo',
+    'oyyyo',
+    '.oyo.',
+    '.oyo.',
+    '..o..',
+    '.ooo.',
+    '.oyo.',
+    '.ooo.'], KEY.icon),
+  what: spr([
+    '.ooo.',
+    'owwwo',
+    'owowo',
+    '.oowo',
+    '.owwo',
+    '.owo.',
+    '.ooo.',
+    '.owo.',
+    '.ooo.'], KEY.icon),
+  heart: spr([
+    '.oo.oo.',
+    'olrorro',
+    'olrrrRo',
+    'orrrrRo',
+    '.orrRo.',
+    '..oRo..',
+    '...o...'], KEY.icon),
+  sweat: spr([
+    '..o.',
+    '.oBo',
+    'oBbo',
+    'oBbo',
+    '.oo.'], KEY.icon),
+  note: spr([
+    '..ooo',
+    '..oyo',
+    '..oyo',
+    '.ooyo',
+    'oyyyo',
+    'oyyo.',
+    '.oo..'], KEY.icon),
+  check: spr([
+    '.....oo',
+    '....ogo',
+    'oo.ogo.',
+    'ogoggo.',
+    '.oggo..',
+    '..oo...'], KEY.icon),
+};
+
+// ---------------------------------------------------------------- props
+const PROP = {
+  laptop: spr([
+    '.oooooooooooo.',
+    '.oddddddddddo.',
+    '.occcccccccco.',
+    '.occcccssccco.',
+    '.occcccssccco.',
+    '.occcccccccco.',
+    '.obbbbbbbbbbo.',
+    'oooooooooooooo',
+    'oddddddddddddo',
+    'oooooooooooooo'], KEY.prop),
+  laptopShut: spr([
+    'oooooooooooooo',
+    'oddddddddddddo',
+    'occcccssccccco',
+    'oooooooooooooo'], KEY.prop),
+  leafTop: spr([
+    '.......ooooooo.......',
+    '....ooo4433333ooo....',
+    '..oo3443333322222oo..',
+    '.o333333222222221111o',
+    'o33322222222211111110',
+    'o2222oooo222oooo1100o',
+    '.oooo....ooo....oooo.'], KEY.prop),
+  sprout: spr([
+    '..oo.....',
+    '.o32o..oo',
+    'o322o.o3o',
+    '.oo2oo32o',
+    '...o2o2o.',
+    '....o2o..',
+    '....oto..',
+    '....oto..'], KEY.prop),
+  log: spr([
+    '..oooooooooooooo..',
+    '.ovvvvvvvvvvvvooxo',
+    'ouuuvvvvvuuuuozxzo',
+    'ouuuuuuuuuuuuoxzxo',
+    'oqquuuuqquuuuozxzo',
+    '.oqqqqqqqqqqqqoxo.',
+    '..oooooooooooooo..'], KEY.prop),
+  mush: spr([
+    '..ooo..',
+    '.onNno.',
+    'onnmnno',
+    'ommmmmo',
+    '.ooioo.',
+    '..oio..',
+    '..ooo..'], KEY.prop),
+  mushS: spr([
+    '.ooo.',
+    'onNno',
+    'ommmo',
+    '.oio.',
+    '.ooo.'], KEY.prop),
+};
+
+// ---------------------------------------------------------------- moon
+const MOON = spr([
+  '....aaaaa....',
+  '..aaaaaaaaa..',
+  '.aaaabbaaaaa.',
+  '.aaabccbaaab.',
+  'aaaabccbaaaab',
+  'aaaaabbaaaabb',
+  'aaaaaaaaabbbb',
+  'aabbaaaaabcbb',
+  'abccbaaabccbb',
+  '.abbaaaaabbb.',
+  '.aaaaaaabbbb.',
+  '..abbbbbbbb..',
+  '....bbbbb....'], KEY.moon);
+
+// ---------------------------------------------------------------- title logo
+const LOGO = spr([
+  '...ooooo..oo.........ooo....oo...oo..ooooo...',
+  '..ow4444oow4o.......ow44o..ow4o.o44oow4444o..',
+  '.o444444oo44o......o44444o.o44o.o44oo444444o.',
+  'o33ooooo.o33o.....o33ooo33oo33ooo33oo33oo333o',
+  'o33o.....o33o.....o33ooo33oo33o3o33oo33o.o33o',
+  'o22o.....o22o.....o2222222oo22o2o22oo22o.o22o',
+  'o22o.....o22o.....o2222222oo2222222oo22o.o22o',
+  'o22ooooo.o22ooooo.o22ooo22oo2222222oo22oo222o',
+  '.o111111oo1111111oo11o.o11oo111o111oo111111o.',
+  '..o11111oo1111111oo11o.o11oo11o.o11oo11111o..',
+  '...ooooo..ooooooo..oo...oo..oo...oo..ooooo...',
+], KEY.logo);
+
+// ---------------------------------------------------------------- anime cut-in portrait
+const PORTRAIT = spr([
+  '...oooooooooooooooooooooooooooooooooooooooooo...',
+  '..o444444443333333333333333333333333333333333o..',
+  '.o44444333333333333333333333333333333333333333o.',
+  'o332ww44222222222222222222222222222222222222211o',
+  'o332w422222222222222222222222222222222222222211o',
+  'o3322222222222222222222222222222222222222222211o',
+  'o3322222222222222222222222222222222222222222211o',
+  'o3322222222222222222222222222222222222222222211o',
+  'o3322222222222222222222222222222222222222222211o',
+  'o332222222kk222222222222222222222222kk222222211o',
+  'o332222222kkkk22222222222222222222kkkk222222211o',
+  'o332222222kwwkkk2222222222222222kkkwwk222222211o',
+  'o332222222kwwkkkk22222222222222kkkkwwk222222211o',
+  'o332222222kkkkkkk22222222222222kkkkkkk222222211o',
+  'o332222222kkkkkkk22222222222222kkkkkkk222222211o',
+  'o332222222kkkkkkk22222222222222kkkkkkk222222211o',
+  'o332222222kkkkbkk22222222222222kkbkkkk222222211o',
+  'o3322222222kkkkk2222222222222222kkkkk2222222211o',
+  'o33222222222kkk222222222222222222kkk22222222211o',
+  'o3322222222222222222222222222222222222222222211o',
+  'o3322222222222222222222222222222222222222222211o',
+  'o33222p2p2p22222222222222222222222222p2p2p22211o',
+  'o33222222222222222222kkkkkk22222222222222222211o',
+  'o33222222222222222222krwwrk22222222222222222211o',
+  'o332222222222222222222kkkk222222222222222222211o',
+  'o3322222222222222222222222222222222222222222211o',
+  'o3322222222222222222222222222222222222222222211o',
+  'o3322222222222222222222222222222222222222222211o',
+  'o3311111111111111111111111111111111111111111111o',
+  'o3311111111111111111111111111111111111111111111o',
+  'o3311111111111111111111111111111111111111111111o',
+  '.oooooooooooooooooooooooooooooooooooooooooooooo.',
+], Object.assign({ k: 'ink', b: 'glint', p: 'blush', r: 'tongue' }, KEY.clawd));
+
+// ---------------------------------------------------------------- 3x5 pixel font
+const FONT_SRC = {
+  A: '.#.|#.#|###|#.#|#.#', B: '##.|#.#|##.|#.#|##.', C: '.##|#..|#..|#..|.##', D: '##.|#.#|#.#|#.#|##.',
+  E: '###|#..|##.|#..|###', F: '###|#..|##.|#..|#..', G: '.##|#..|#.#|#.#|.##', H: '#.#|#.#|###|#.#|#.#',
+  I: '###|.#.|.#.|.#.|###', J: '..#|..#|..#|#.#|.#.', K: '#.#|#.#|##.|#.#|#.#', L: '#..|#..|#..|#..|###',
+  M: '#...#|##.##|#.#.#|#...#|#...#', N: '#..#|##.#|#.##|#..#|#..#', O: '.#.|#.#|#.#|#.#|.#.',
+  P: '##.|#.#|##.|#..|#..', Q: '.#.|#.#|#.#|##.|.##', R: '##.|#.#|##.|#.#|#.#', S: '.##|#..|.#.|..#|##.',
+  T: '###|.#.|.#.|.#.|.#.', U: '#.#|#.#|#.#|#.#|###', V: '#.#|#.#|#.#|#.#|.#.', W: '#...#|#...#|#.#.#|##.##|#...#',
+  X: '#.#|#.#|.#.|#.#|#.#', Y: '#.#|#.#|.#.|.#.|.#.', Z: '###|..#|.#.|#..|###',
+  0: '###|#.#|#.#|#.#|###', 1: '.#.|##.|.#.|.#.|###', 2: '##.|..#|.#.|#..|###', 3: '##.|..#|.#.|..#|##.',
+  4: '#.#|#.#|###|..#|..#', 5: '###|#..|##.|..#|##.', 6: '.#.|#..|##.|#.#|.#.', 7: '###|..#|.#.|.#.|.#.',
+  8: '.#.|#.#|.#.|#.#|.#.', 9: '.#.|#.#|.##|..#|.#.',
+  '.': '.|.|.|.|#', ',': '.|.|.|#|#', '!': '#|#|#|.|#', '?': '##.|..#|.#.|...|.#.', "'": '#|#|.|.|.',
+  '-': '...|...|###|...|...', ':': '.|#|.|#|.', '/': '..#|..#|.#.|#..|#..', '>': '#..|.#.|..#|.#.|#..',
+  '<': '..#|.#.|#..|.#.|..#', '(': '.#|#.|#.|#.|.#', ')': '#.|.#|.#|.#|#.', '=': '...|###|...|###|...',
+  '+': '...|.#.|###|.#.|...', '*': '...|#.#|.#.|#.#|...', '_': '...|...|...|...|###', '#': '#.#|###|#.#|###|#.#',
+  '♥': '.#.#.|#####|#####|.###.|..#..', '✓': '....#|...##|#.##.|###..|.#...', '▶': '#..|##.|###|##.|#..',
+  '♪': '.##|.#.|.#.|##.|##.', '{': '.##|.#.|#..|.#.|.##', '}': '##.|.#.|..#|.#.|##.', ';': '..|.#|..|.#|#.',
+  '[': '##|#.|#.|#.|##', ']': '##|.#|.#|.#|##', '"': '#.#|#.#|...|...|...', '█': '###|###|###|###|###', '…': '.....|.....|.....|.....|#.#.#', '★': '..#..|.###.|#####|.###.|.#.#.',
+  ' ': '..|..|..|..|..',
+};
+const FONT = {};
+for (const ch in FONT_SRC) {
+  const rows = FONT_SRC[ch].split('|');
+  FONT[ch] = { w: rows[0].length, rows };
+}
+function textWidth(s) {
+  let w = 0;
+  for (const ch of s) { const g = FONT[ch] || FONT[' ']; w += g.w + 1; }
+  return Math.max(0, w - 1);
+}
+function drawText(s, x, y, c, shadow = 0, alpha = 1) {
+  x = Math.round(x); y = Math.round(y);
+  let cx = x;
+  for (const ch of s) {
+    const g = FONT[ch] || FONT[' '];
+    for (let j = 0; j < 5; j++) for (let i = 0; i < g.w; i++) {
+      if (g.rows[j][i] !== '#') continue;
+      const X = cx + i, Y = y + j;
+      if (alpha < 1 && bay(X, Y) >= alpha) continue;
+      if (shadow) { pset(X + 1, Y, shadow); pset(X, Y + 1, shadow); pset(X + 1, Y + 1, shadow); }
+      pset(X, Y, c);
+    }
+    cx += g.w + 1;
+  }
+  return cx - x - 1;
+}
+// big text: each font pixel becomes a 2x2 block with a dark outline
+function drawTextBig(s, x, y, c, outline) {
+  x = Math.round(x); y = Math.round(y);
+  const pass = (col, ox, oy, grow) => {
+    let cx = x;
+    for (const ch of s) {
+      const g = FONT[ch] || FONT[' '];
+      for (let j = 0; j < 5; j++) for (let i = 0; i < g.w; i++) if (g.rows[j][i] === '#')
+        rect(cx + i * 2 + ox - grow, y + j * 2 + oy - grow, 2 + grow * 2, 2 + grow * 2, col);
+      cx += (g.w + 1) * 2;
+    }
+  };
+  if (outline) { pass(outline, 0, 1, 1); pass(outline, 0, 0, 1); }
+  pass(c, 0, 0, 0);
+}
+function textWidthBig(s) { return textWidth(s) * 2; }
+function wrapText(s, maxW) {
+  const lines = [];
+  for (const para of s.split('\n')) {
+    let cur = '';
+    for (const w of para.split(' ')) {
+      const t = cur ? cur + ' ' + w : w;
+      if (textWidth(t) <= maxW || !cur) cur = t; else { lines.push(cur); cur = w; }
+    }
+    if (cur) lines.push(cur);
+  }
+  return lines;
+}
+
+
+// ---------------------------------------------------------------- parallax layers
+function layer(w, h, paint) {
+  const L = { w, h, buf: new Uint32Array(w * h) };
+  target(L); paint(L); target(null);
+  return L;
+}
+function drawLayer(L, ox, oy, wrap = true) {
+  ox = Math.round(ox); oy = Math.round(oy);
+  const y0 = Math.max(0, oy), y1 = Math.min(H, oy + L.h), buf = L.buf, lw = L.w;
+  for (let y = y0; y < y1; y++) {
+    const row = (y - oy) * lw, o = y * W;
+    if (wrap) {
+      let lx = ((-ox) % lw + lw) % lw;
+      for (let x = 0; x < W; x++) {
+        const c = buf[row + lx];
+        if (c) FB[o + x] = c;
+        if (++lx === lw) lx = 0;
+      }
+    } else {
+      const xa = Math.max(0, ox), xb = Math.min(W, ox + lw);
+      for (let x = xa; x < xb; x++) { const c = buf[row + x - ox]; if (c) FB[o + x] = c; }
+    }
+  }
+}
+// a copy of a layer with some colours swapped (cached): used for the sunrise palette shift
+const TINT_CACHE = new Map();
+function tinted(L, pairs, k, key) {
+  const id = key + ':' + k;
+  if (TINT_CACHE.has(id)) return TINT_CACHE.get(id);
+  const map = new Map(pairs.map(([a, b]) => [a, mix(a, b, k)]));
+  const out = { w: L.w, h: L.h, buf: L.buf.map(c => map.has(c) ? map.get(c) : c) };
+  TINT_CACHE.set(id, out);
+  return out;
+}
+// moonlit rims: recolour filled pixels (optionally only of colour `match`)
+// whose neighbour (dx, dy) is empty or a different colour
+function rimLayer(L, col, dx, dy, match = 0, wrap = true) {
+  const src = L.buf.slice(), out = L.buf, w = L.w, h = L.h;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = y * w + x, c = src[i];
+    if (!c || (match && c !== match)) continue;
+    let nx = x + dx; const ny = y + dy;
+    if (wrap) nx = (nx % w + w) % w;
+    if (ny < 0 || ny >= h || nx < 0 || nx >= w || src[ny * w + nx] !== c) out[i] = col;
+  }
+}
+// draw something on a wrapping layer, repeating it across the seam when needed
+function wrapDraw(w, x, margin, fn) {
+  fn(x);
+  if (x < margin) fn(x + w);
+  if (x > w - margin) fn(x - w);
+}
+// a ridge line that wraps seamlessly over w
+function ridge(seed, w, base, comps) {
+  const r = mulberry(seed), ph = comps.map(() => r() * TAU), out = new Float32Array(w);
+  for (let x = 0; x < w; x++) {
+    let v = base;
+    for (let i = 0; i < comps.length; i++) v += Math.sin(x / w * TAU * comps[i][0] + ph[i]) * comps[i][1];
+    out[x] = v;
+  }
+  return out;
+}
+// vertical sky gradient with ordered dithering between colour stops [[worldY, colour], ...]
+function skyGrad(stops, oy = 0) {
+  for (let y = 0; y < H; y++) {
+    const wy = y + oy;
+    let k = 0;
+    while (k < stops.length - 2 && wy >= stops[k + 1][0]) k++;
+    const a = stops[k], b = stops[k + 1];
+    const t = clamp((wy - a[0]) / (b[0] - a[0]), 0, 1), o = y * W, yy = (Math.floor(wy) & 3) << 2;
+    for (let x = 0; x < W; x++) FB[o + x] = BAYER[yy | (x & 3)] < t ? b[1] : a[1];
+  }
+}
+function makeStars(seed, n, x0, x1, y0, y1) {
+  const r = mulberry(seed), out = [];
+  for (let i = 0; i < n; i++) {
+    const b = r();
+    out.push({ x: x0 + r() * (x1 - x0), y: y0 + r() * (y1 - y0), b: b < .07 ? 2 : b < .3 ? 1 : 0, ph: r() * TAU, sp: .7 + r() * 2.4 });
+  }
+  return out;
+}
+const STAR_MID = hex('#b3b6ee');
+function drawStars(stars, ox, oy, t, alpha = 1, wrapW = 0) {
+  for (const s of stars) {
+    let x = s.x - ox;
+    if (wrapW) x = ((x % wrapW) + wrapW) % wrapW;
+    x = Math.round(x);
+    const y = Math.round(s.y - oy);
+    if (x < -2 || x > W + 1 || y < -2 || y > H + 1) continue;
+    if (alpha < 1 && bay(x, y) >= alpha) continue;
+    const tw = .5 + .5 * Math.sin(t * s.sp + s.ph);
+    if (s.b === 0) { if (tw > .3) pset(x, y, tw > .85 ? C.n8 : C.n6); }
+    else if (s.b === 1) pset(x, y, tw > .45 ? STAR_MID : C.n8);
+    else {
+      pset(x, y, C.white);
+      if (tw > .5) { const c = tw > .82 ? STAR_MID : C.n7; pset(x - 1, y, c); pset(x + 1, y, c); pset(x, y - 1, c); pset(x, y + 1, c); }
+    }
+  }
+}
+// 4-point twinkle
+function sparkle(x, y, s, c = C.st3) {
+  if (s <= .15) return;
+  x = Math.round(x); y = Math.round(y);
+  pset(x, y, C.white);
+  if (s > .9) { pset(x - 1, y, c); pset(x + 1, y, c); pset(x, y - 1, c); pset(x, y + 1, c); }
+  if (s > 1.8) { pset(x - 2, y, c); pset(x + 2, y, c); pset(x, y - 2, c); pset(x, y + 2, c); }
+  if (s > 2.7) { const d = mix(c, C.n3, .45); pset(x - 3, y, d); pset(x + 3, y, d); pset(x, y - 3, d); pset(x, y + 3, d); }
+}
+// additive cross flare for bright lights
+function flare(x, y, len, c, k = 1) {
+  x = Math.round(x); y = Math.round(y);
+  for (let i = 1; i <= len; i++) {
+    const f = k * (1 - i / (len + 1)) ** 1.5;
+    addPx(x + i, y, c, f); addPx(x - i, y, c, f); addPx(x, y + i, c, f); addPx(x, y - i, c, f);
+  }
+  addPx(x, y, C.white, k);
+}
+function makeFlies(seed, n, x0, x1, y0, y1) {
+  const r = mulberry(seed), out = [];
+  for (let i = 0; i < n; i++) out.push({ bx: x0 + r() * (x1 - x0), by: y0 + r() * (y1 - y0), ph: r() * TAU, sp: .4 + r() * .7 });
+  return out;
+}
+function drawFlies(flies, ox, oy, t, wrapW = 0) {
+  for (const f of flies) {
+    let x = f.bx + Math.sin(t * f.sp + f.ph) * 7 - ox;
+    if (wrapW) x = ((x % wrapW) + wrapW) % wrapW - 8;
+    const y = f.by + Math.sin(t * f.sp * 1.7 + f.ph * 2) * 4 - oy;
+    const bl = .5 + .5 * Math.sin(t * 2.3 + f.ph * 3);
+    if (bl < .3) continue;
+    glow(x, y, 4.5, C.ff0, bl * .5, 3);
+    pset(x, y, bl > .7 ? C.ff1 : C.ff0);
+  }
+}
+
+// ---------------------------------------------------------------- particles
+let PARTS = [];
+function emit(o) {
+  const p = Object.assign({ x: 0, y: 0, vx: 0, vy: 0, ay: 0, drag: 0, t: 0, life: 1, type: 'px', c: C.white, z: 1, s: 1, ph: 0 }, o);
+  PARTS.push(p);
+  return p;
+}
+function updParts(dt) {
+  for (let i = PARTS.length - 1; i >= 0; i--) {
+    const p = PARTS[i];
+    p.t += dt;
+    if (p.t >= p.life || p.dead) { PARTS[i] = PARTS[PARTS.length - 1]; PARTS.pop(); continue; }
+    p.vy += p.ay * dt;
+    if (p.drag) { const d = Math.exp(-p.drag * dt); p.vx *= d; p.vy *= d; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    if (p.upd) p.upd(p, dt);
+  }
+}
+function drawParts(z, ox, oy) {
+  for (const p of PARTS) if (p.z === z) drawPart(p, Math.round(p.x - ox), Math.round(p.y - oy));
+}
+function drawPart(p, x, y) {
+  const k = p.t / p.life, a = 1 - k;
+  switch (p.type) {
+    case 'px': if (bay(x, y) < a * 1.5) pset(x, y, p.c); break;
+    case 'glow': addPx(x, y, p.c, a * p.s); break;
+    case 'spark': sparkle(x, y, p.s * (k < .25 ? k / .25 : a / .75), p.c); break;
+    case 'dust': {
+      const r = p.s * (.6 + k * .9), rc = Math.ceil(r);
+      for (let j = -rc; j <= rc; j++) for (let i = -rc; i <= rc; i++)
+        if (i * i + j * j <= r * r && bay(x + i, y + j) < a * .85) pset(x + i, y + j, p.c);
+      break;
+    }
+    case 'glyph': drawText(p.ch, x - 1, y - 2, p.c, 0, Math.min(1, a * 2.2)); break;
+    case 'icon': { const ic = ICON[p.icon]; blit(ic, x - (ic.w >> 1), y - (ic.h >> 1), false, 0, Math.min(1, a * 2.5)); break; }
+    case 'tear': pset(x, y, C.tear); pset(x, y - 1, C.glint); break;
+    case 'rain': pset(x, y, C.rn2); pset(x + 1, y - 1, C.rn1); pset(x + 1, y - 2, C.rn0); break;
+    case 'petal': { const f = Math.floor(p.t * 5 + p.ph) % 3; pset(x, y, C.pk0); if (f) pset(x + (f & 1), y + (f >> 1), C.pk1); break; }
+    case 'leaf': pset(x, y, p.c); if (Math.floor(p.t * 4 + p.ph) & 1) pset(x + 1, y, p.c2 || p.c); else pset(x, y + 1, p.c2 || p.c); break;
+    case 'ring': {
+      const r = p.s * (.15 + E.out(k) * .85), n = Math.max(12, Math.ceil(r * 6));
+      for (let i = 0; i < n; i++) {
+        const an = i / n * TAU, X = x + Math.cos(an) * r, Y = y + Math.sin(an) * r * (p.ry || 1);
+        if (bay(Math.round(X), Math.round(Y)) < a * 1.3) pset(X, Y, p.c);
+      }
+      break;
+    }
+    case 'bird': {
+      const f = Math.floor(p.t * 9 + p.ph) & 1;
+      if (f) { pset(x - 1, y, p.c); pset(x, y + 1, p.c); pset(x + 1, y, p.c); }
+      else { pset(x - 1, y + 1, p.c); pset(x, y, p.c); pset(x + 1, y + 1, p.c); }
+      break;
+    }
+  }
+}
+function puff(x, y, n = 2) {
+  for (let i = 0; i < n; i++)
+    emit({ type: 'dust', x: x + rr(-5, 5), y: y - rr(0, 2), vx: rr(-16, 16), vy: rr(-10, -2), drag: 3.5, life: rr(.35, .6), s: rr(1, 2.2), c: (S && S.dustC) || C.du1, z: 1 });
+}
+function burst(x, y, n, cols, spd = 40, z = 2, life = .8) {
+  for (let i = 0; i < n; i++) {
+    const an = rr(0, TAU), v = rr(spd * .3, spd);
+    emit({ type: rnd() < .45 ? 'spark' : 'px', x, y, vx: Math.cos(an) * v, vy: Math.sin(an) * v, drag: 2.2, life: rr(life * .5, life), s: rr(1, 2.8), c: pick(cols), z });
+  }
+}
+function hearts(x, y, n = 3) {
+  for (let i = 0; i < n; i++) emit({ type: 'icon', icon: 'heart', x: x + rr(-8, 8), y: y - rr(0, 4), vx: rr(-6, 6), vy: rr(-22, -12), drag: .6, life: rr(1.1, 1.6), z: 2 });
+}
+
+// ---------------------------------------------------------------- actors: Clawd
+const GRAV = 400;
+const OPEN_EYES = { normal: 1, smile: 1, sparkle: 1, worried: 1, surprised: 1, teary: 1, flustered: 1, determined: 1 };
+function newClawd(x, y) {
+  return {
+    kind: 'clawd', x, y, gy: y, vx: 0, vy: 0, air: false, jumpQ: 0, jumpV: 0, jumpVX: 0, landT: 0,
+    sq: 0, sqv: 0, sqBase: 0, breathe: true,
+    face: 'normal', faceBase: 'normal', face2: null, faceT: 0, blinkT: 1.5, blink: 0, look: null, lx: 0, ly: 0,
+    arms: null, armL: 'rest', armR: 'rest', armLy: 0, armRy: 0, legs: [3, 3, 3, 3], legsO: null,
+    tx: null, speed: 20, run: false, moving: false, dir: 1, walkPh: 0, lastPh: -1,
+    sit: false, typing: 0, wave: 0, t: 0, bob: 0, shake: 0, shx: 0,
+    emote: null, vis: true, dust: true, ground: null, onLand: null, box: null,
+  };
+}
+function express(a, face, dur = 1.2) { a.face2 = face; a.faceT = dur; }
+function emote(a, icon, dur = 1.3) { a.emote = { icon, t: 0, dur }; }
+function jump(a, v = 120, vx = 0) { if (a.air || a.jumpQ > 0) return; a.jumpQ = .085; a.jumpV = v; a.jumpVX = vx; }
+function updClawd(c, dt) {
+  c.t += dt;
+  if (c.ground) c.gy = c.ground(c.x);
+  c.moving = false;
+  if (c.tx != null && !c.air && c.jumpQ <= 0) {
+    const d = c.tx - c.x, st = c.speed * dt;
+    if (Math.abs(d) <= st) { c.x = c.tx; c.tx = null; }
+    else { c.x += Math.sign(d) * st; c.moving = true; c.dir = Math.sign(d); }
+  }
+  if (c.jumpQ > 0) {
+    c.jumpQ -= dt;
+    if (c.jumpQ <= 0) { c.air = true; c.vy = -c.jumpV; c.vx = c.jumpVX; c.sqv += 7; }
+  }
+  if (c.air) {
+    c.vy += GRAV * dt; c.x += c.vx * dt; c.y += c.vy * dt;
+    if (c.ground) c.gy = c.ground(c.x);
+    if (c.vy > 0 && c.y >= c.gy) {
+      c.y = c.gy; c.air = false; c.vx = 0;
+      c.sqv -= 6 + Math.min(8, c.vy / 25); c.landT = .14;
+      if (c.dust) puff(c.x, c.y, 3);
+      if (c.onLand) { const f = c.onLand; c.onLand = null; f(c); }
+    }
+  } else c.y = c.gy;
+  if (c.landT > 0) c.landT -= dt;
+  // squash & stretch spring
+  let tgt = c.sqBase;
+  if (c.breathe && !c.moving && !c.air && c.jumpQ <= 0) tgt += -.09 + .11 * Math.sin(c.t * 3.3);
+  if (c.jumpQ > 0) tgt = -.85;
+  if (c.air) tgt = clamp(-c.vy / 170, -.35, .9);
+  if (c.run && c.moving) tgt += .12;
+  c.sqv += (tgt - c.sq) * 240 * dt;
+  c.sqv *= Math.exp(-8 * dt);
+  c.sq += c.sqv * dt;
+  // limbs
+  let legs = [3, 3, 3, 3], aL = 'rest', aR = 'rest', aLy = 0, aRy = 0, bob = 0;
+  if (c.air) { legs = [4, 4, 4, 4]; aL = aR = c.vy < 20 ? 'up' : 'out'; }
+  else if (c.jumpQ > 0) { legs = [2, 2, 2, 2]; aL = aR = 'down'; }
+  else if (c.landT > 0) { legs = [2, 2, 2, 2]; aL = aR = 'out'; }
+  else if (c.sit) legs = [1, 1, 1, 1];
+  else if (c.moving) {
+    c.walkPh += dt * (c.run ? 15 : 8);
+    const ph = Math.floor(c.walkPh) % 4;
+    if (c.run) {
+      legs = [[4, 2, 4, 2], [3, 3, 3, 3], [2, 4, 2, 4], [3, 3, 3, 3]][ph];
+      bob = ph % 2 === 0 ? -1 : 0;
+      aLy = ph < 2 ? -1 : 1; aRy = -aLy;
+      if (c.dust && ph % 2 === 0 && c.lastPh !== ph) puff(c.x - c.dir * 7, c.y, 1);
+    } else {
+      legs = [[3, 2, 3, 2], [3, 3, 3, 3], [2, 3, 2, 3], [3, 3, 3, 3]][ph];
+      aLy = ph === 0 ? 1 : 0; aRy = ph === 2 ? 1 : 0;
+    }
+    c.lastPh = ph;
+  }
+  if (c.typing) { const k = Math.floor(c.t * (c.typing > 1 ? 20 : 7)) & 1; aLy = k; aRy = 1 - k; }
+  if (c.wave) {
+    const k = Math.floor(c.t * (c.wave > 2 ? 7 : 4)) & 1;
+    aR = k ? 'up' : 'high';
+    if (c.wave >= 2) aL = k ? 'high' : 'up';
+  }
+  if (c.arms) { aL = c.arms[0]; aR = c.arms[1]; }
+  if (c.legsO) legs = c.legsO;
+  c.legs = legs; c.armL = aL; c.armR = aR; c.armLy = aLy; c.armRy = aRy; c.bob = bob;
+  if (c.look) { c.lx = c.look[0]; c.ly = c.look[1]; } else { c.lx = c.moving ? c.dir : 0; c.ly = 0; }
+  // expression & blinking
+  c.blinkT -= dt;
+  if (c.blinkT <= 0) { c.blink = .11; c.blinkT = 2 + rnd() * 2.8; }
+  if (c.blink > 0) c.blink -= dt;
+  if (c.faceT > 0) { c.faceT -= dt; if (c.faceT <= 0) c.face2 = null; }
+  let f = c.face2 || c.faceBase;
+  if (c.blink > 0 && OPEN_EYES[f]) f = 'blink';
+  c.face = f;
+  if (c.emote) { c.emote.t += dt; if (c.emote.t > c.emote.dur) c.emote = null; }
+  if (c.shake > 0) c.shake -= dt;
+  c.shx = c.shake > 0 ? ((Math.floor(c.t * 28) & 1) ? 1 : -1) : 0;
+}
+// where the top of Clawd's head is (world y), matching drawClawd
+function clawdTop(c) {
+  const dh = clamp(Math.round(c.sq * 3), -3, 4);
+  return Math.round(c.y) - (c.sit ? 1 : 3) + (c.bob | 0) - (11 + dh);
+}
+function drawEmote(e, x, top) {
+  const ic = ICON[e.icon];
+  if (!ic) return;
+  const k = e.t, pop = k < .18 ? E.back(k / .18) : 1;
+  const alpha = k > e.dur - .25 ? (e.dur - k) / .25 : 1;
+  if (e.icon === 'sweat') { blit(ic, Math.round(x + 7), top + 2 + Math.floor(k * 3), false, 0, alpha); return; }
+  const yoff = Math.round((1 - pop) * 5) + (k > .18 ? Math.round(Math.sin((k - .18) * 7) * .7) : 0);
+  blit(ic, Math.round(x - ic.w / 2), top - ic.h - 1 + yoff, false, 0, alpha);
+}
+function drawActor(c, ox, oy, shadowC) {
+  if (!c.vis) return;
+  if (shadowC) {
+    const hgt = Math.max(0, c.gy - c.y);
+    ellipseD(c.x - ox, c.gy - oy + 1, Math.max(4, 10 - hgt * .15), 2, shadowC, clamp(1 - hgt / 50, .2, 1));
+  }
+  const saveX = c.x, saveY = c.y;
+  c.x -= ox; c.y -= oy;
+  c.box = drawClawd(c);
+  c.x = saveX; c.y = saveY;
+  if (c.emote) drawEmote(c.emote, c.box.left + c.box.w / 2, c.box.top);
+}
+
+// ---------------------------------------------------------------- actors: the little star
+const STAR_VAR = new Map();
+function starVariant(base, dh) {
+  const key = base.id + ',' + dh;
+  if (STAR_VAR.has(key)) return STAR_VAR.get(key);
+  let rows = [...Array(base.rows.length).keys()];
+  if (dh > 0) rows = [...rows.slice(0, 9), ...Array(dh).fill(8), ...rows.slice(9)];
+  else if (dh < 0) rows = rows.filter(r => r !== 8);
+  const s = spr(rows.map(r => base.rows[r]), base.key);
+  STAR_VAR.set(key, s);
+  return s;
+}
+STARS.whole.id = 'w'; STARS.whole.key = KEY.star;
+STARS.broken.id = 'b'; STARS.broken.key = KEY.star;
+STARS.wholeDim.id = 'wd'; STARS.wholeDim.key = KEY.dim;
+STARS.brokenDim.id = 'bd'; STARS.brokenDim.key = KEY.dim;
+function newStar(x, y) {
+  return {
+    kind: 'star', x, y, gy: y, vx: 0, vy: 0, air: false, t: 0, lift: 0,
+    face: 'normal', faceBase: 'normal', face2: null, faceT: 0, blinkT: 2.2, blink: 0,
+    broken: true, dim: 1, glitch: 0, fix: 0, glowK: .35, glowR: 12, sq: 0, sqv: 0, shake: 0,
+    vis: true, onLand: null, emote: null, box: null, ride: null,
+  };
+}
+function hop(s, v = 80, vx = 0) { s.air = true; s.vy = -v; s.vx = vx; s.sqv += 5; }
+function updStar(s, dt) {
+  s.t += dt;
+  if (s.ride) {           // sitting on Clawd's head
+    s.x = s.ride.x; s.gy = s.y = clawdTop(s.ride) + 1; s.air = false;
+  } else if (s.air) {
+    s.vy += GRAV * dt; s.x += s.vx * dt; s.y += s.vy * dt;
+    if (s.vy > 0 && s.y >= s.gy) {
+      s.y = s.gy; s.air = false; s.vx = 0; s.sqv -= 6;
+      if (s.onLand) { const f = s.onLand; s.onLand = null; f(s); }
+    }
+  }
+  let tgt = s.air ? clamp(-s.vy / 140, -.4, .8) : 0;
+  s.sqv += (tgt - s.sq) * 260 * dt; s.sqv *= Math.exp(-9 * dt); s.sq += s.sqv * dt;
+  s.blinkT -= dt;
+  if (s.blinkT <= 0) { s.blink = .11; s.blinkT = 1.8 + rnd() * 2.6; }
+  if (s.blink > 0) s.blink -= dt;
+  if (s.faceT > 0) { s.faceT -= dt; if (s.faceT <= 0) s.face2 = null; }
+  let f = s.face2 || s.faceBase;
+  if (s.blink > 0 && (f === 'normal' || f === 'wow')) f = 'closed';
+  s.face = f;
+  if (s.shake > 0) s.shake -= dt;
+  if (s.emote) { s.emote.t += dt; if (s.emote.t > s.emote.dur) s.emote = null; }
+}
+const GLITCH_COLS = [C.hz3, C.cRed, C.white, C.cPur];
+function drawStarActor(s, ox, oy, t) {
+  if (!s.vis) return;
+  const dh = s.fix > 0 && s.fix < 1 ? 0 : clamp(Math.round(s.sq * 2), -1, 2);
+  const base = s.broken ? (s.dim > .5 ? STARS.brokenDim : STARS.broken) : (s.dim > .5 ? STARS.wholeDim : STARS.whole);
+  const sp = starVariant(base, dh);
+  const shx = s.shake > 0 ? ((Math.floor(s.t * 30) & 1) ? 1 : -1) : 0;
+  const x = Math.round(s.x - ox - 6) + shx, y = Math.round(s.y - oy - s.lift) - sp.h + 1;
+  s.box = { left: x, top: y, w: 13, h: sp.h };
+  // halo
+  const flick = s.dim > .5 ? .6 + .4 * Math.sin(t * 23) * Math.sin(t * 7.3) : 1;
+  if (s.glowK > 0) glow(x + 6.5, y + sp.h / 2 + 1, s.glowR, s.dim > .5 ? C.dm3 : C.st3, s.glowK * flick, 6, false);
+  if (s.glitch > 0) {
+    const fr = Math.floor(t * 18);
+    for (let j = 0; j < sp.h; j++) {
+      const hsh = hash2(j * 3 + 1, fr);
+      const off = hsh < s.glitch * .45 ? (hash2(j, fr + 99) < .5 ? -2 : 2) : 0;
+      const solid = hash2(j + 40, fr) < s.glitch * .25 ? GLITCH_COLS[fr % 4] : 0;
+      for (let i = 0; i < sp.w; i++) {
+        const c = sp.px[j * sp.w + i];
+        if (c) pset(x + i + off, y + j, solid && c !== C.ink ? solid : c);
+      }
+    }
+    for (let n = 0; n < s.glitch * 7; n++) {
+      pset(x - 3 + hash2(n, fr) * 19, y - 2 + hash2(n + 50, fr) * (sp.h + 4), GLITCH_COLS[(n + fr) % 4]);
+    }
+  } else blit(sp, x, y);
+  // the missing point being rebuilt pixel by pixel
+  if (s.broken && s.fix > 0) {
+    const n = Math.min(STAR_FIX.length, Math.floor(s.fix * (STAR_FIX.length + 1)));
+    for (let i = 0; i < n; i++) {
+      const [px, py, ch] = STAR_FIX[i];
+      const fresh = i >= n - 2 && s.fix < 1;
+      pset(x + px, y + py, fresh ? C.white : ch === 'o' ? C.ink : C[KEY.star[ch]]);
+    }
+  }
+  const f = STAR_FACES[s.face] || STAR_FACES.normal;
+  if (!s.glitch || (Math.floor(t * 18) & 3)) blit(f, x + 2, y + 4);
+  if (s.emote) drawEmote(s.emote, x + 6.5, y + (s.broken ? 2 : 0));
+}
+
+// ---------------------------------------------------------------- captions & speech bubbles
+const liveRegion = document.getElementById('captions');
+function announce(text) { liveRegion.textContent = text.replace(/[♥✓▶♪★]/g, '').replace(/\n/g, ' ').trim(); }
+function caption(text, dur = 4, pos = 'top') {
+  S.cap = { text, lines: wrapText(text, 88), t: 0, dur, pos };
+  announce(text);
+}
+function drawCaption() {
+  const c = S.cap;
+  if (!c) return;
+  const fade = c.t > c.dur - .35 ? clamp((c.dur - c.t) / .35, 0, 1) : clamp(c.t / .2, 0, 1);
+  const lh = 7, h = c.lines.length * lh + 5, lb = Math.round(S.lb * 13);
+  const y0 = c.pos === 'top' ? 3 + lb : c.pos === 'mid' ? Math.round((H - h) / 2) : H - h - 3 - lb;
+  brect(0, y0, W, h, C.ink, .62 * fade);
+  drect(0, y0 - 1, W, 1, C.ink, .5 * fade);
+  drect(0, y0 + h, W, 1, C.ink, .5 * fade);
+  let shown = Math.floor(c.t * 32);
+  c.lines.forEach((ln, i) => {
+    const part = ln.slice(0, Math.max(0, shown));
+    shown -= ln.length + 1;
+    drawText(part, Math.round((W - textWidth(ln)) / 2), y0 + 3 + i * lh, mix(C.ink, C.tx, fade));
+  });
+}
+function say(who, text, dur = 2.4) {
+  const b = { who, text, lines: wrapText(text, 60), t: 0, dur };
+  S.bubbles.push(b);
+  announce(text);
+  return b;
+}
+function drawBubble(b) {
+  const box = b.who.box;
+  if (!box) return;
+  const tw = Math.max(...b.lines.map(textWidth)), bw = tw + 6, bh = b.lines.length * 7 + 3;
+  const sx = box.left + box.w / 2, sy = box.top - 2;
+  const pop = b.t < .12 ? b.t / .12 : 1, fade = b.t > b.dur - .2 ? (b.dur - b.t) / .2 : 1;
+  if (pop < .5 || fade <= 0) return;
+  const bx = clamp(Math.round(sx - bw / 2), 1, W - bw - 1), by = Math.round(sy - bh - 3);
+  rect(bx + 1, by, bw - 2, bh, C.white); rect(bx, by + 1, bw, bh - 2, C.white);
+  rect(bx + 1, by - 1, bw - 2, 1, C.ink); rect(bx + 1, by + bh, bw - 2, 1, C.ink);
+  rect(bx - 1, by + 1, 1, bh - 2, C.ink); rect(bx + bw, by + 1, 1, bh - 2, C.ink);
+  pset(bx, by, C.ink); pset(bx + bw - 1, by, C.ink); pset(bx, by + bh - 1, C.ink); pset(bx + bw - 1, by + bh - 1, C.ink);
+  const tx = clamp(Math.round(sx), bx + 3, bx + bw - 4);
+  rect(tx - 1, by + bh, 3, 1, C.white); pset(tx - 2, by + bh, C.ink); pset(tx + 2, by + bh, C.ink);
+  pset(tx, by + bh + 1, C.white); pset(tx - 1, by + bh + 1, C.ink); pset(tx + 1, by + bh + 1, C.ink);
+  pset(tx, by + bh + 2, C.ink);
+  let shown = Math.floor(b.t * 30);
+  b.lines.forEach((ln, i) => {
+    const part = ln.slice(0, Math.max(0, shown));
+    shown -= ln.length + 1;
+    drawText(part, bx + 3 + Math.round((tw - textWidth(ln)) / 2), by + 2 + i * 7, mix(C.white, C.ink, fade));
+  });
+}
+
+// ---------------------------------------------------------------- transitions
+const CLAWD_MASK = [
+  '...############...',
+  '...############...',
+  '...##.######.##...',
+  '...##.######.##...',
+  '.################.',
+  '.################.',
+  '...############...',
+  '...############...',
+  '....#.#....#.#....',
+  '....#.#....#.#....',
+];
+function inStar(x, y, r, rot) {
+  const a = Math.atan2(y, x) - rot, d = Math.hypot(x, y);
+  const seg = ((a % (TAU / 5)) + TAU / 5) % (TAU / 5) / (TAU / 5);   // 0..1 across one point
+  const k = Math.abs(seg - .5) * 2;                                  // 1 at tips, 0 between
+  return d < r * (.5 + .5 * k * k);
+}
+// p: 0 = clear, 1 = fully covered
+function applyMask(kind, p, dir, cx, cy) {
+  if (p <= 0) return;
+  const col = kind === 'white' ? C.white : C.black;
+  if (p >= 1) { rect(0, 0, W, H, col); return; }
+  if (kind === 'fade' || kind === 'white') { brect(0, 0, W, H, col, Math.round(p * 10) / 10); return; }
+  if (kind === 'wipe') {
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const u = (x + y * .35) / (W + H * .35), e = bay(x, y) * .08;
+      if (dir === 'out' ? u < p * 1.08 - .08 + e : u > 1.08 - p * 1.08 - e) FB[y * W + x] = C.black;
+    }
+    return;
+  }
+  const q = 1 - p;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const dx = x + .5 - cx, dy = y + .5 - cy;
+    let inside;
+    if (kind === 'iris') inside = dx * dx + dy * dy < (q * 105) ** 2;
+    else if (kind === 'star') inside = inStar(dx, dy, q * 150, -Math.PI / 2 + p * 1.2);
+    else {                                   // clawd-shaped iris
+      const s = p < .6 ? lerp(34, 2.8, E.out(p / .6)) : p < .8 ? 2.8 : lerp(2.8, 0, (p - .8) / .2);
+      const mx = Math.floor(dx / s + 9), my = Math.floor(dy / s + 5);
+      inside = my >= 0 && my < 10 && mx >= 0 && mx < 18 && CLAWD_MASK[my][mx] === '#';
+    }
+    if (!inside) FB[y * W + x] = C.black;
+  }
+}
+
+// ---------------------------------------------------------------- scenery helpers
+function pine(cx, base, h, w, col) {
+  const tiers = Math.max(2, Math.round(h / 8));
+  for (let y = 0; y < h; y++) {
+    const ty = y / h, tp = (ty * tiers) % 1;
+    const hw = Math.max(.5, w / 2 * (.18 + .82 * ty) * (.5 + .5 * tp));
+    rect(Math.round(cx - hw), Math.round(base - h + y), Math.max(1, Math.round(hw * 2)), 1, col);
+  }
+}
+function puffTree(cx, base, h, r, col, trunk) {
+  rect(Math.round(cx - 1), Math.round(base - h * .5), 3, Math.round(h * .5) + 1, trunk);
+  const top = base - h + r;
+  disc(cx, top, r, col);
+  disc(cx - r * .75, top + r * .65, r * .72, col);
+  disc(cx + r * .7, top + r * .55, r * .78, col);
+  disc(cx + r * .1, top + r * 1.0, r * .75, col);
+}
+const cache = {};
+const once = (k, f) => cache[k] || (cache[k] = f());
+
+// ---------------------------------------------------------------- scenery: the hill (night & dawn)
+const hillY = x => 98 + .0065 * (x - 48) * (x - 48);
+const SKY_NIGHT = [[-130, C.n0], [-55, C.n1], [4, C.n2], [34, C.n3], [52, C.n4], [64, C.n5], [74, C.n6], [84, C.n7], [96, C.n8]];
+const HILL_PAL = {
+  night: {
+    mb: C.mt2, mbr: C.mt3, mf: C.mt1, mfr: C.mt2, mid: C.h2, midr: C.h3, tree: C.h1,
+    hill: C.h5, hd: C.h4, hl: C.h6, rim: C.h8, tuft: C.h7, fg: C.h1,
+    flowers: [C.pk1, C.white, C.st3, C.pk0],
+  },
+  dawn: {
+    mb: hex('#8b6ba7'), mbr: hex('#eba7b2'), mf: hex('#664b8b'), mfr: hex('#bd86ae'), mid: hex('#3d3765'), midr: hex('#76608f'), tree: hex('#2e2952'),
+    hill: hex('#46665b'), hd: hex('#395650'), hl: hex('#5f8465'), rim: hex('#e3d38e'), tuft: hex('#8aa671'), fg: hex('#252c49'),
+    flowers: [C.pk1, C.white, C.st3, C.pk0],
+  },
+};
+function buildHill(pal) {
+  const P = HILL_PAL[pal], set = { P };
+  const back = ridge(11, 192, 20, [[1, 7], [3, 4], [7, 2], [13, 1]]);
+  const front = ridge(23, 192, 31, [[2, 6], [5, 3], [11, 1.5]]);
+  set.mount = layer(192, 64, L => {
+    for (let x = 0; x < 192; x++) rect(x, Math.round(back[x]), 1, 64, P.mb);
+    rimLayer(L, P.mbr, 0, -1, P.mb);
+    rimLayer(L, P.mbr, -1, 0, P.mb);
+    for (let x = 0; x < 192; x++) rect(x, Math.round(front[x]), 1, 64, P.mf);
+    rimLayer(L, P.mfr, 0, -1, P.mf);
+    rimLayer(L, P.mfr, -1, 0, P.mf);
+  });
+  const mh = ridge(37, 192, 13, [[2, 4], [5, 2], [9, 1]]);
+  set.midTop = mh;
+  set.mid = layer(192, 46, L => {
+    for (let x = 0; x < 192; x++) rect(x, Math.round(mh[x]), 1, 46, P.mid);
+    const r = mulberry(41);
+    for (let i = 0; i < 30; i++) {
+      const x = r() * 192, base = Math.round(mh[Math.floor(x)]) + 3, kind = r(), hh = 5 + r() * 8, ww = 3 + r() * 3;
+      wrapDraw(192, x, 8, X => kind < .55 ? pine(X, base, hh, ww, P.tree) : puffTree(X, base, hh * .8, 2 + ww * .3, P.tree, P.tree));
+    }
+    // the valley woods on the right, where the star lands
+    for (let i = 0; i < 12; i++) {
+      const x = 62 + i * 3.3 + r() * 2, base = Math.round(mh[Math.floor(x)]) + 6;
+      pine(x, base, 9 + r() * 7, 5 + r() * 2, P.tree);
+    }
+    rimLayer(L, P.midr, 0, -1, P.mid);
+    // Clawd's little house on the left hill
+    const hx = 12, hb = Math.round(mh[hx]) + 1;
+    rect(hx - 3, hb - 4, 7, 4, P.tree);
+    for (let i = 0; i < 4; i++) rect(hx - 4 + i, hb - 5 - i, 9 - i * 2, 1, P.tree);
+    rect(hx + 2, hb - 9, 1, 3, P.tree);
+    set.window = [hx, hb - 2];
+  });
+  set.hill = layer(128, 40, L => {
+    for (let x = 0; x < 128; x++) {
+      const wx = x - 16, top = Math.round(hillY(wx)) - 92;
+      for (let y = Math.max(0, top); y < 40; y++) {
+        const d = y - top, hs = hash2(wx, y);
+        let c = d < 1 ? P.rim : d < 2 ? P.hl : P.hill;
+        if (d >= 2 && hs < .1) c = P.hl;
+        else if (d >= 3 && hs > .9) c = P.hd;
+        if (d > 7 && bay(x, y) < (d - 7) / 10) c = P.hd;
+        pset(x, y, c);
+      }
+      if (hash2(wx, 7) < .35) pset(x, top - 1, P.tuft);
+      if (hash2(wx, 8) < .12) { pset(x, top - 1, P.tuft); pset(x, top - 2, P.tuft); }
+    }
+    const r = mulberry(5);
+    for (let i = 0; i < 22; i++) {
+      const wx = -16 + r() * 128, y = Math.round(hillY(wx)) - 92 + 2 + Math.floor(r() * 14);
+      pset(wx + 16, y, P.flowers[i % 4]);
+    }
+  });
+  set.stars = makeStars(3, 120, 0, 96, -130, 70);
+  // the milky way: a soft band of light, ordered-dithered into three levels, plus extra faint stars
+  set.haze = [];
+  for (let y = -130; y < 64; y++) for (let x = 0; x < 96; x++) {
+    const d = (y - (62 - x * .8)) / 1.28;
+    const dens = Math.exp(-(d * d) / 150) * (.62 + .38 * Math.sin(x * .13 + y * .21) * Math.sin(x * .05 - y * .09));
+    const q = Math.floor(dens * 3 + bay(x, y) - .15);
+    if (q >= 1) set.haze.push({ x, y, k: q >= 3 ? .13 : q === 2 ? .085 : .05 });
+    if (dens > .5 && hash2(x, y) > .982) set.stars.push({ x, y, b: 0, ph: x * 1.7, sp: 1 + (y & 7) * .2 });
+  }
+  set.flies = makeFlies(9, 7, 0, 110, 84, 112);
+  return set;
+}
+function drawHill(set, S, o = {}) {
+  const cx = S.cam.x + S.ox, cy = S.cam.y + S.oy, t = S.t, P = set.P;
+  skyGrad(o.sky || SKY_NIGHT, cy * .15);
+  const sa = o.starA == null ? 1 : o.starA;
+  if (sa > 0) {
+    for (const h of set.haze) {
+      const x = h.x - cx * .1, y = Math.round(h.y - cy * .2);
+      if (y >= 0 && y < H && x >= 0 && x < W && (sa >= 1 || bay(x, y) < sa)) addPx(x, y, C.n8, h.k);
+    }
+    drawStars(set.stars, cx * .1, cy * .2, t, sa);
+  }
+  if (o.moon !== false) {
+    const m = o.moon || [10, 12], mx = m[0] - cx * .15, my = m[1] - cy * .25;
+    glow(mx + 6.5, my + 6.5, 24, C.mo1, .16, 8, false);
+    glow(mx + 6.5, my + 6.5, 12, C.mo1, .14, 6, false);
+    blit(MOON, mx, my);
+  }
+  if (o.sky2) o.sky2(cx, cy);
+  drawLayer(set.mount, -cx * .3, 50 - cy * .45);
+  if (o.behindMid) o.behindMid(cx, cy);
+  drawLayer(set.mid, -cx * .55, 78 - cy * .7);
+  const wx = set.window[0] - cx * .55, wy = 78 - cy * .7 + set.window[1];
+  pset(wx, wy, C.st2);
+  glow(wx + .5, wy + .5, 3.5, C.st1, .45, 3);
+  if (o.behindHill) o.behindHill(cx, cy);
+  drawLayer(set.hill, -16 - cx, 92 - cy, false);
+  if (o.flies !== false) drawFlies(set.flies, cx, cy, t);
+}
+// swaying grass silhouettes in the very front
+function drawFgGrass(cx, cy, t, col, seed = 1, baseY = 123, k = 1.2) {
+  for (let i = 0; i < 34; i++) {
+    const hx = hash2(i, seed), hh = hash2(i + 99, seed);
+    const bx = hx < .5 ? hx * 2 * 30 - 8 : 66 + (hx - .5) * 2 * 38;
+    const x0 = bx - cx * k, y0 = baseY - cy * k, h = 4 + hh * 10;
+    const sway = Math.sin(t * 1.7 + i * .9) * (.6 + hh * 1.4);
+    line(x0, y0, x0 + sway, y0 - h, col);
+    if (hh > .4) line(x0 + 1, y0, x0 + 1 + sway * .7, y0 - h * .6, col);
+  }
+}
+
+// ---------------------------------------------------------------- scene machinery
+let S = null, SI = 0;
+const SCENES = [];
+const TR = { phase: 'none', t: 0, dur: 0, kind: 'fade', next: 0, cx: W / 2, cy: H / 2 };
+const at = t => S.pt < t && S.t >= t;
+const REDUCED = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+const themeMeta = document.querySelector('meta[name="theme-color"]');
+function startScene(i) {
+  SI = i;
+  const sc = SCENES[i];
+  rnd = mulberry(1000 + i * 77);
+  PARTS = [];
+  S = { t: 0, pt: -1, sc, cam: { x: 0, y: 0 }, ox: 0, oy: 0, shake: 0, flash: 0, flashC: C.white, lb: 0, bubbles: [], cap: null, dustC: C.du1, focus: null };
+  sc.init(S);
+}
+// let the page around the canvas continue the colours at its top and bottom edges
+const backTop = document.getElementById('backTop'), backBottom = document.getElementById('backBottom');
+function rowColour(y) {
+  let r = 0, g = 0, b = 0;
+  for (let x = 0; x < W; x++) { const c = FB[y * W + x]; r += cR(c); g += cG(c); b += cB(c); }
+  return 'rgb(' + (r / W | 0) + ',' + (g / W | 0) + ',' + (b / W | 0) + ')';
+}
+function syncBackdrop() {
+  const top = rowColour(0), portrait = window.innerHeight / window.innerWidth > H / W;
+  const bottom = portrait ? rowColour(H - 1) : top;
+  if (backTop.dataset.c !== top) { backTop.dataset.c = top; backTop.style.backgroundColor = top; if (themeMeta) themeMeta.content = top; }
+  if (backBottom.dataset.c !== bottom) { backBottom.dataset.c = bottom; backBottom.style.backgroundColor = bottom; }
+}
+function goTo(i) {
+  if (TR.phase === 'out') return;
+  const cur = SCENES[SI];
+  TR.next = (i + SCENES.length) % SCENES.length;
+  TR.kind = cur.tout || 'fade';
+  TR.dur = TR.kind === 'cut' ? 0 : cur.toutDur || .7;
+  const f = S.focus || [W / 2, H / 2];
+  TR.cx = f[0]; TR.cy = f[1];
+  TR.phase = 'out'; TR.t = 0;
+}
+function update(dt) {
+  if (TR.phase === 'out') {
+    TR.t += dt;
+    if (TR.t >= TR.dur) {
+      startScene(TR.next);
+      const sc = SCENES[SI];
+      TR.kind = sc.tin || 'fade';
+      TR.dur = TR.kind === 'cut' ? 0 : sc.tinDur || .7;
+      TR.t = 0; TR.phase = 'in';
+      const f = S.focus || [W / 2, H / 2];
+      TR.cx = f[0]; TR.cy = f[1];
+    }
+  } else if (TR.phase === 'in') {
+    TR.t += dt;
+    if (TR.t >= TR.dur) TR.phase = 'none';
+  }
+  S.pt = S.t; S.t += dt;
+  S.sc.update(S, dt);
+  updParts(dt);
+  if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 5);
+  if (S.flash > 0) S.flash = Math.max(0, S.flash - dt * 2.2);
+  if (S.cap) { S.cap.t += dt; if (S.cap.t > S.cap.dur) S.cap = null; }
+  for (const b of S.bubbles) b.t += dt;
+  S.bubbles = S.bubbles.filter(b => b.t < b.dur);
+  if (TR.phase === 'none' && S.sc.dur && S.t >= S.sc.dur) goTo(SI + 1);
+}
+const vrnd = mulberry(4242);
+let frameNo = 0;
+function render() {
+  target(null);
+  const sh = S.shake > 0 && !REDUCED ? S.shake : 0;
+  S.ox = sh ? Math.round((vrnd() * 2 - 1) * sh) : 0;
+  S.oy = sh ? Math.round((vrnd() * 2 - 1) * sh) : 0;
+  S.sc.draw(S);
+  if (S.flash > 0) {
+    const a = Math.round(Math.min(1, S.flash) * 6) / 6 * (REDUCED ? .4 : 1);
+    if (a > 0) brect(0, 0, W, H, S.flashC, a);
+  }
+  if (S.lb > 0) { const h = Math.round(S.lb * 13); rect(0, 0, W, h, C.black); rect(0, H - h, W, h, C.black); }
+  for (const b of S.bubbles) drawBubble(b);
+  drawCaption();
+  if (TR.phase !== 'none' && TR.dur > 0) {
+    const p = clamp(TR.t / TR.dur, 0, 1);
+    const e = TR.kind === 'clawd' ? p : E.inOut(p);
+    applyMask(TR.kind, TR.phase === 'out' ? e : 1 - e, TR.phase, TR.cx, TR.cy);
+  }
+  ctx.putImageData(IMG, 0, 0);
+  if (++frameNo % 20 === 1) syncBackdrop();
+}
+
+// ================================================================= THE STORY
+function shootingStar(x0, y0, x1, y1, p, len = 12) {
+  if (p <= 0 || p >= 1.3) return;
+  const q = Math.min(p, 1), hx = lerp(x0, x1, q), hy = lerp(y0, y1, q);
+  const d = Math.hypot(x1 - x0, y1 - y0), ux = (x1 - x0) / d, uy = (y1 - y0) / d;
+  const fade = p > 1 ? 1 - (p - 1) / .3 : 1;
+  for (let i = 0; i < len; i++) addPx(hx - ux * i, hy - uy * i, C.st4, (1 - i / len) * fade * .85);
+  if (p < 1) { glow(hx, hy, 3.5, C.st3, .5); pset(hx, hy, C.white); }
+}
+
+// ---- 0. title card
+SCENES.push({
+  name: 'title', dur: 7.6, tin: 'fade', tinDur: 1, tout: 'star', toutDur: .9,
+  init(S) {
+    S.set = once('hillNight', () => buildHill('night'));
+    S.cam.y = -6;
+    const c = S.clawd = newClawd(48, 124);
+    c.gy = 98; c.vis = false; c.faceBase = 'smile';
+    S.behind = true;
+    S.focus = [48, 70];
+  },
+  update(S, dt) {
+    const c = S.clawd;
+    if (at(1.6)) {
+      c.vis = true; c.air = true; c.vy = -190; c.faceBase = 'joy';
+      c.onLand = () => { c.faceBase = 'smile'; emote(c, 'heart', 1.3); };
+    }
+    if (c.air && c.vy > 0) S.behind = false;
+    if (at(3.2)) { c.wave = 1; express(c, 'happy', 1.7); }
+    if (at(4.8)) c.wave = 0;
+    if (at(5.1)) jump(c, 85);
+    if (at(5.65)) jump(c, 85);
+    if (at(6.1)) S.shoot = 0;
+    if (S.shoot != null) S.shoot += dt;
+    if (at(6.35)) { c.look = [0, -1]; express(c, 'sparkle', 1.3); }
+    S.cam.x = lerp(-7, 7, E.inOut(prog(S.t, 0, 7.6)));
+    updClawd(c, dt);
+  },
+  draw(S) {
+    const c = S.clawd, set = S.set, cx = S.cam.x + S.ox, cy = S.cam.y + S.oy, t = S.t;
+    drawHill(set, S, {
+      moon: [72, 38],
+      sky2: () => { if (S.shoot != null) shootingStar(40, 40, 8, 60, S.shoot / .7); },
+      behindHill: () => { if (S.behind) drawActor(c, cx, cy); },
+    });
+    if (!S.behind) drawActor(c, cx, cy, set.P.hd);
+    drawFgGrass(cx, cy, t, set.P.fg);
+    drawParts(1, cx, cy); drawParts(2, cx, cy);
+    // logo drops in and bounces, then a shine sweeps across it
+    const lx = 25, ly = t < .15 ? -14 : Math.round(lerp(-14, 12, E.bounce(prog(t, .15, 1.25))));
+    glow(48, ly + 6, 30, C.cl1, .2 * prog(t, .6, 1.6));
+    blit(LOGO, lx, ly);
+    if (t > 1.4) {
+      const sw = ((t - 1.4) % 2.8) * 64 - 10;
+      for (let y = 0; y < LOGO.h; y++) for (let x = 0; x < LOGO.w; x++) {
+        const d = x + y * .6 - sw, c0 = LOGO.px[y * LOGO.w + x];
+        if (d >= 0 && d < 3 && c0 && c0 !== C.ink) pset(lx + x, ly + y, d < 1.5 ? C.white : C.cl4);
+      }
+    }
+    sparkle(lx - 2, ly + 2, 2.8 * Math.max(0, Math.sin(t * 3.1)), C.st3);
+    sparkle(lx + LOGO.w + 1, ly + 9, 2.8 * Math.max(0, Math.sin(t * 3.1 + 2)), C.st3);
+    const sub = 'AND THE LITTLE STAR', n = Math.floor((t - 1.3) * 22);
+    if (n > 0) drawText(sub.slice(0, n), Math.round((W - textWidth(sub)) / 2), 28, C.tx, C.ink);
+    if (t > 2.4 && (Math.floor(t * 1.6) & 1)) {
+      const h = 'TAP TO SKIP';
+      drawText(h, Math.round((W - textWidth(h)) / 2), 113, C.txDim, C.ink);
+    }
+  },
+});
+
+// the little star while it is still up in the sky (world coords, star parallax)
+function skyStar(x, y, k, t) {
+  const tw = .6 + .4 * Math.sin(t * 5.3);
+  if (k > 0) { glow(x + .5, y + .5, 5 + k * 5, C.st3, .35 * k); flare(x, y, Math.round(2 + k * 4 * tw), C.st3, .55 + .3 * k); }
+  sparkle(x, y, 1 + k * 1.6 * tw, C.st3);
+}
+function laptopGlow(c, cx, cy) {
+  glow(c.x - cx, c.y - cy - 6, 11, C.hz2, .18, 6, false);
+}
+
+// ---- 1. every night, Clawd coded under the stars
+SCENES.push({
+  name: 'coding', dur: 12.6, tin: 'star', tinDur: .9, tout: 'cut',
+  init(S) {
+    S.set = once('hillNight', () => buildHill('night'));
+    S.cam.y = -78;
+    const c = S.clawd = newClawd(48, 98);
+    c.sit = true; c.typing = 1; c.look = [0, 1];
+    S.laptop = true;
+    S.focus = [48, 64];
+    S.sk = 0;
+  },
+  update(S, dt) {
+    const c = S.clawd, t = S.t;
+    S.cam.y = lerp(-78, 0, E.inOut(prog(t, .5, 4.4)));
+    if (at(1.1)) caption('EVERY NIGHT, CLAWD\nCODED UNDER THE STARS.', 5.4);
+    if (at(4.9)) { c.typing = 0; c.look = [0, -1]; c.faceBase = 'sparkle'; }
+    if (at(5.5)) emote(c, 'note', 1.5);
+    if (at(6.9)) { c.arms = ['high', 'high']; c.sqBase = .8; c.faceBase = 'yawn'; c.look = null; c.breathe = false; }
+    if (at(8.1)) { c.arms = null; c.sqBase = 0; c.sqv -= 5; c.faceBase = 'content'; c.breathe = true; }
+    if (at(8.9)) { c.typing = 1; c.faceBase = 'smile'; c.look = [0, 1]; }
+    if (t > 9.8) S.sk = Math.min(1, S.sk + dt * .8);
+    if (at(10.6)) { c.typing = 0; c.look = [1, -1]; c.faceBase = 'normal'; emote(c, 'what', 1.7); }
+    c.tint = [C.hz3, .2 + .04 * Math.sin(t * 9) * Math.sin(t * 3.1)];
+    updClawd(c, dt);
+  },
+  draw(S) {
+    const c = S.clawd, cx = S.cam.x + S.ox, cy = S.cam.y + S.oy, t = S.t;
+    drawHill(S.set, S, { sky2: () => skyStar(70 - cx * .1, 26 - cy * .2, S.sk, t) });
+    drawActor(c, cx, cy, S.set.P.hd);
+    if (S.laptop) { laptopGlow(c, cx, cy); blit(PROP.laptop, 41 - cx, 93 - cy); }
+    drawFgGrass(cx, cy, t, S.set.P.fg);
+    drawParts(1, cx, cy); drawParts(2, cx, cy);
+  },
+});
+
+// ---- 2. but one night... a star fell!
+SCENES.push({
+  name: 'starfall', dur: 9.4, tin: 'cut', tout: 'wipe', toutDur: .6,
+  init(S) {
+    S.set = once('hillNight', () => buildHill('night'));
+    const c = S.clawd = newClawd(48, 98);
+    c.sit = true; c.look = [1, -1];
+    S.laptop = 'open';
+    S.fx = 70; S.fy = 26; S.fallen = false; S.boom = -1;
+    S.focus = [48, 70];
+  },
+  update(S, dt) {
+    const c = S.clawd, t = S.t;
+    if (t < 1) { S.fx = 70 + (hash2(Math.floor(t * 20), 3) < .5 ? -1 : 1) * (t > .4 ? 1 : 0); S.fy = 26; }
+    else if (t < 2.3) {
+      const p = E.in(prog(t, 1, 2.3));
+      S.fx = lerp(70, 84, p) + Math.sin(p * 3.4) * 5; S.fy = lerp(26, 91, p);
+      emit({ type: 'glow', x: S.fx + rr(-1, 1), y: S.fy + rr(-1, 1), vx: rr(-4, 4), vy: rr(-6, 2), life: rr(.4, .9), c: pick([C.st3, C.st2, C.white]), s: .9, z: 0 });
+      if (rnd() < .35) emit({ type: 'spark', x: S.fx, y: S.fy, vx: rr(-10, 10), vy: rr(-10, 5), drag: 2, life: .5, s: 2, c: C.st3, z: 0 });
+    }
+    if (t < 2.3) c.look = [S.fx > c.x + 6 ? 1 : 0, S.fy < 75 ? -1 : 0];
+    if (at(1.2)) { c.sit = false; jump(c, 110); c.faceBase = 'surprised'; emote(c, 'bang', 1.6); }
+    if (at(2.3)) {
+      S.fallen = true; S.boom = 0; S.flash = .8; S.shake = 3;
+      emit({ type: 'ring', x: 84, y: 92, s: 40, ry: .35, life: 1, c: C.st3, z: 0 });
+      burst(84, 90, 26, [C.st3, C.st2, C.white], 60, 0, 1.1);
+      for (let i = 0; i < 5; i++) emit({ type: 'bird', x: 78 + rr(-8, 10), y: 88 + rr(-3, 3), vx: rr(-25, 25), vy: rr(-30, -18), life: 2.5, ph: i, c: C.h0, z: 0 });
+    }
+    if (S.boom >= 0) S.boom += dt;
+    if (at(2.5)) caption('BUT ONE NIGHT...\nA STAR FELL!', 4.2);
+    if (at(3.5)) { c.faceBase = 'worried'; emote(c, 'sweat', 1.6); c.look = [1, 0]; }
+    if (at(4.8)) c.faceBase = 'sad';
+    if (at(5.6)) { c.faceBase = 'determined'; c.look = [1, 0]; S.glint = 0; }
+    if (S.glint != null) S.glint += dt;
+    if (at(6.3)) { S.laptop = 'shut'; puff(46, 101, 2); c.sqv -= 3; }
+    if (at(6.9)) { c.run = true; c.speed = 58; c.tx = 150; c.look = null; }
+    c.tint = S.laptop === 'open' && !c.air ? [C.hz3, .2] : null;
+    S.cam.x = lerp(-3, 5, E.inOut(prog(t, 0, 9.4)));
+    S.cam.y = -5 * Math.sin(Math.PI * prog(t, .8, 3.4));
+    updClawd(c, dt);
+  },
+  draw(S) {
+    const c = S.clawd, cx = S.cam.x + S.ox, cy = S.cam.y + S.oy, t = S.t;
+    drawHill(S.set, S, {
+      sky2: () => { if (t < 1) skyStar(S.fx - cx * .1, S.fy - cy * .2, 1, t); },
+      behindMid: () => {
+        if (t >= 1 && !S.fallen) {
+          const x = S.fx - cx, y = S.fy - cy;
+          glow(x, y, 7, C.st3, .7); sparkle(x, y, 2.6, C.st3); pset(x, y, C.white);
+        }
+        if (S.boom >= 0) {
+          const k = Math.max(0, 1 - S.boom / 3), x = 84 - cx, y = 92 - cy;
+          glow(x, y, 26 * k + 8, C.st3, .8 * k + .15);
+          for (let dx = -3; dx <= 3; dx++) lineAdd(x + dx, y, x + dx, y - 90, C.st4, k * k * (1 - Math.abs(dx) / 4) * .6);
+        }
+        drawParts(0, cx, cy);
+      },
+    });
+    if (S.boom >= 0) {
+      glow(84 - cx, 94 - cy, 14, C.st1, .3 + .1 * Math.sin(t * 6), 5, false);
+      if (rnd() < .3) emit({ type: 'spark', x: 84 + rr(-6, 6), y: 93, vx: rr(-3, 3), vy: rr(-18, -8), life: rr(.8, 1.4), s: rr(1, 2.2), c: C.st3, z: 1 });
+    }
+    drawActor(c, cx, cy, S.set.P.hd);
+    if (S.laptop === 'open') { laptopGlow(c, cx, cy); blit(PROP.laptop, 41 - cx, 93 - cy); }
+    else blit(PROP.laptopShut, 41 - cx, 99 - cy);
+    if (S.glint != null && S.glint < .5 && c.box) sparkle(c.box.left + c.box.w - 6, c.box.top + 3, 3 * Math.sin(S.glint / .5 * Math.PI), C.white);
+    drawFgGrass(cx, cy, t, S.set.P.fg);
+    drawParts(1, cx, cy); drawParts(2, cx, cy);
+    if (c.run && c.moving) for (let i = 0; i < 3; i++) {
+      const y = c.y - cy - 4 - i * 4 + ((Math.floor(t * 20) + i) % 3), x = c.x - cx - 14 - ((t * 90 + i * 17) % 20);
+      line(x, y, x + 5, y, C.n8);
+    }
+  },
+});
+
+// ---------------------------------------------------------------- scenery: the forest
+const PATH_C = [hex('#211c33'), hex('#2c2540'), hex('#3a3152'), hex('#4a4066')];
+function buildForest() {
+  const set = {};
+  set.stars = makeStars(17, 26, 0, 192, 0, 34);
+  set.far = layer(192, 100, L => {
+    const r = mulberry(61), trees = [];
+    for (let i = 0; i < 30; i++) trees.push([i * 6.4 + r() * 5, 44 + r() * 46, 11 + r() * 8]);
+    for (const [x, h, w] of trees) wrapDraw(192, x, 12, X => pine(X, 100, h, w, C.f2));
+    rimLayer(L, C.f3, -1, 0, C.f2);
+  });
+  set.mid = layer(192, 116, L => {
+    const r = mulberry(71), trees = [];
+    for (let i = 0; i < 8; i++) trees.push([i * 24 + r() * 10, 60 + r() * 36, 9 + r() * 5]);
+    for (const [x, h, rad] of trees) wrapDraw(192, x, 26, X => puffTree(X, 116, h, rad, C.f3, C.tr1));
+    rimLayer(L, C.f5, -1, 0, C.f3);
+    rimLayer(L, C.f4, 0, -1, C.f3);
+  });
+  set.near = layer(256, 126, L => {
+    const r = mulberry(83), trunks = [], leaves = [];
+    for (let i = 0; i < 5; i++) trunks.push([i * 51 + r() * 22, 5 + Math.floor(r() * 3)]);
+    for (const [x, w] of trunks) wrapDraw(256, x, 14, X => {
+      rect(X, 0, w, 126, C.tr0); rect(X - 2, 118, w + 4, 8, C.tr0); rect(X - 4, 122, w + 8, 4, C.tr0);
+    });
+    rimLayer(L, C.tr2, -1, 0, C.tr0);
+    for (let i = 0; i < 12; i++) leaves.push([r() * 256, r() * 10, 7 + r() * 9]);
+    for (const [x, y, rad] of leaves) wrapDraw(256, x, 18, X => disc(X, y, rad, C.f1));
+    rimLayer(L, C.f2, 0, 1, C.f1);
+  });
+  set.ground = layer(192, 26, L => {
+    for (let x = 0; x < 192; x++) {
+      const top = 2 + Math.round(Math.sin(x / 192 * TAU * 5) * .7 + Math.sin(x / 192 * TAU * 13) * .6);
+      for (let y = top; y < 26; y++) {
+        const d = y - top, hs = hash2(x, y + 300);
+        let c = d < 1 ? C.h6 : d < 2 ? C.h5 : d < 4 ? PATH_C[3] : PATH_C[2];
+        if (d >= 4 && hs < .08) c = PATH_C[3];
+        else if (d >= 4 && hs > .93) c = PATH_C[1];
+        if (d > 8 && bay(x, y) < (d - 8) / 7) c = PATH_C[1];
+        if (d > 14 && bay(x, y) < (d - 14) / 6) c = PATH_C[0];
+        pset(x, y, c);
+      }
+      if (hash2(x, 11) < .4) pset(x, top - 1, C.h5);
+      if (hash2(x, 12) < .15) { pset(x, top - 1, C.h6); pset(x, top - 2, C.h5); }
+    }
+  });
+  set.fg = layer(256, 30, L => {
+    const r = mulberry(91), bushes = [];
+    for (let i = 0; i < 7; i++) bushes.push([i * 37 + r() * 20, 6 + r() * 6]);
+    for (const [x, rad] of bushes) wrapDraw(256, x, 22, X => {
+      disc(X, 30, rad * 1.4, C.f0); disc(X + rad, 31, rad, C.f0); disc(X - rad * 1.1, 32, rad * .9, C.f0);
+    });
+    rimLayer(L, C.f1, 0, -1, C.f0);
+  });
+  const r = mulberry(95);
+  set.mush = [];
+  for (let i = 0; i < 9; i++) set.mush.push({ x: i * 21 + r() * 12, big: r() < .45, ph: r() * TAU });
+  set.flies = makeFlies(29, 12, 0, 192, 40, 96);
+  return set;
+}
+function drawMush(m, x, gy, t) {
+  const sp = m.big ? PROP.mush : PROP.mushS;
+  glow(x, gy - sp.h + 2, 7, C.mug, .22 + .08 * Math.sin(t * 2 + m.ph), 5, false);
+  blit(sp, x - (sp.w >> 1), gy - sp.h + 1);
+}
+function drawForest(set, S) {
+  const cx = S.cam.x + S.ox, cy = S.cam.y + S.oy, t = S.t;
+  skyGrad([[0, C.n0], [30, C.n1], [60, C.n2], [90, C.n3], [120, C.n4]], cy * .1);
+  drawStars(set.stars, cx * .1, cy * .1, t, 1, 192);
+  drawLayer(set.far, -cx * .2, 8 - cy * .2);
+  for (let y = 76; y < 100; y++) drect(0, y, W, 1, C.n4, .3 * (1 - Math.abs(y - 88) / 12));
+  drawLayer(set.mid, -cx * .45, -4 - cy * .4);
+  for (let i = 0; i < 3; i++) {
+    const bx = ((i * 97 - cx * .6) % 260 + 260) % 260 - 70;
+    for (let w = 0; w < 6; w++) lineAdd(bx + w, -2, bx + w + 46, 100, C.n8, .05);
+  }
+  drawLayer(set.near, -cx * .8, -8 - cy * .8);
+  drawLayer(set.ground, -cx, 98 - cy);
+  for (const m of set.mush) {
+    const x = ((m.x - cx) % 192 + 192) % 192 - 24;
+    if (x > -10 && x < W + 10) drawMush(m, x, 100 - cy, t);
+  }
+}
+
+// ---------------------------------------------------------------- scenery: the clearing
+function buildClearing() {
+  const set = {};
+  set.stars = makeStars(23, 46, -8, 104, 0, 64);
+  set.back = layer(112, 64, L => {
+    const r = mulberry(101);
+    for (let i = 0; i < 26; i++) pine(i * 4.5 + r() * 3, 64, 18 + r() * 26, 8 + r() * 6, C.f2);
+    rimLayer(L, C.f3, -1, 0, C.f2, false);
+    rimLayer(L, C.f3, 0, -1, C.f2, false);
+  });
+  set.frame = layer(112, 126, L => {
+    rect(0, 0, 13, 110, C.tr0); rect(12, 60, 3, 50, C.tr0); rect(4, 104, 16, 6, C.tr0);
+    rect(99, 0, 13, 110, C.tr0); rect(97, 64, 3, 46, C.tr0); rect(92, 104, 16, 6, C.tr0);
+    rimLayer(L, C.tr2, 1, 0, C.tr0, false);
+    rimLayer(L, C.tr1, -1, 0, C.tr0, false);
+    disc(8, 4, 17, C.f1); disc(24, -3, 13, C.f1); disc(0, 26, 12, C.f1); disc(30, 6, 7, C.f1);
+    disc(104, 6, 16, C.f1); disc(88, -2, 12, C.f1); disc(112, 28, 11, C.f1); disc(82, 7, 6, C.f1);
+    rimLayer(L, C.f2, 0, 1, C.f1, false);
+    rimLayer(L, C.f3, 1, 0, C.f1, false);
+  });
+  set.ground = layer(112, 30, L => {
+    for (let y = 0; y < 30; y++) for (let x = 0; x < 112; x++) {
+      const hs = hash2(x, y + 900);
+      let c = y < 2 ? C.h4 : y < 7 ? C.h5 : C.h6;
+      if (y >= 2 && hs < .09) c = y < 7 ? C.h6 : C.h7;
+      else if (hs > .92) c = y < 7 ? C.h4 : C.h5;
+      if (y > 16 && bay(x, y) < (y - 16) / 10) c = C.h5;
+      const dx = (x - 72) / 15, dy = (y - 5) / 3.6, d = dx * dx + dy * dy;
+      if (d < 1) c = d > .7 ? (dy < 0 ? C.h7 : C.h3) : d > .35 ? C.h3 : C.h2;
+      pset(x, y, c);
+    }
+    for (let x = 0; x < 112; x++) if (hash2(x, 3) < .45) pset(x, 0, C.h4);
+  });
+  set.mush = [{ x: 14, big: true, ph: 0 }, { x: 20, big: false, ph: 2 }, { x: 84, big: true, ph: 4 }, { x: 78, big: false, ph: 1 }];
+  set.flies = makeFlies(31, 8, 0, 96, 46, 96);
+  return set;
+}
+function drawClearingBack(set, S) {
+  const cx = S.cam.x + S.ox, cy = S.cam.y + S.oy, t = S.t;
+  skyGrad([[0, C.n1], [28, C.n2], [52, C.n3], [72, C.n4], [96, C.n5]], cy * .1);
+  drawStars(set.stars, cx * .1, cy * .1, t);
+  const mx = 50 - cx * .1, my = 5 - cy * .1;
+  glow(mx + 6.5, my + 6.5, 20, C.mo1, .14, 7, false);
+  blit(MOON, mx, my);
+  drawLayer(set.back, -8 - cx * .3, 38 - cy * .3, false);
+  for (let y = 78; y < 98; y++) drect(0, y, W, 1, C.n5, .28 * (1 - Math.abs(y - 90) / 10));
+  drawLayer(set.ground, -8 - cx, 94 - cy, false);
+  for (const m of set.mush) drawMush(m, m.x - cx, 99 - cy, t);
+}
+function drawClearingFront(set, S) {
+  const cx = S.cam.x + S.ox, cy = S.cam.y + S.oy;
+  drawLayer(set.frame, -8 - cx * 1.1, -6 - cy, false);
+  drawFlies(set.flies, cx, cy, S.t);
+  drawFgGrass(cx, cy, S.t, C.f0, 7, 124, 1.15);
+}
+function drawShards(S, cx, cy) {
+  for (const [x, y, ph] of S.shards) {
+    blit(STARS.shardDim, x - 2 - cx, y - 4 - cy);
+    const k = Math.sin(S.t * 2.1 + ph);
+    if (k > .8) sparkle(x - cx, y - 3 - cy, (k - .8) * 12, C.dm4);
+  }
+}
+
+// ---------------------------------------------------------------- the anime cut-in
+const CUTIN_WHO = { box: { left: 24, top: 29, w: 48, h: 4 } };
+function drawCutIn(S, t) {
+  rect(0, 0, W, H, C.cl1);
+  const fr = Math.floor(t * 20);
+  for (let i = 0; i < 40; i++) {
+    const a = hash2(i, fr) * TAU, r0 = 22 + hash2(i + 50, fr) * 22;
+    line(48 + Math.cos(a) * r0, 60 + Math.sin(a) * r0, 48 + Math.cos(a) * 95, 60 + Math.sin(a) * 95, hash2(i + 9, fr) < .55 ? C.cl3 : C.cl4);
+  }
+  const px = Math.round(lerp(-60, 24, E.out(prog(t, 0, .3)))), py = 56;
+  blit(PORTRAIT, px, py);
+  if (t > .55 && t < 1.15) {
+    const k = Math.sin((t - .55) / .6 * Math.PI) * 3.4;
+    sparkle(px + 12, py + 12, k, C.white); sparkle(px + 36, py + 12, k, C.white);
+  }
+  for (let x = 0; x < W; x++) {
+    const top = Math.round(26 - x * .09), bot = Math.round(88 - x * .09);
+    rect(x, 0, 1, top, C.black); pset(x, top, C.white);
+    rect(x, bot + 1, 1, H - bot, C.black); pset(x, bot, C.white);
+  }
+}
+
+// ---------------------------------------------------------------- hologram terminal
+function drawTerminal(T, t) {
+  if (T.open <= 0) return;
+  const hh = Math.max(1, Math.round(T.h * T.open)), y0 = T.y + Math.round((T.h - hh) / 2);
+  const ww = T.open < .15 ? Math.round(T.w * T.open / .15) : T.w, x0 = T.x + Math.round((T.w - ww) / 2);
+  brect(x0, y0, ww, hh, C.hz0, .8);
+  for (let y = y0; y < y0 + hh; y += 2) brect(x0, y, ww, 1, C.hz1, .3);
+  rect(x0, y0, ww, 1, C.hz3); rect(x0, y0 + hh - 1, ww, 1, C.hz3);
+  rect(x0, y0, 1, hh, C.hz3); rect(x0 + ww - 1, y0, 1, hh, C.hz3);
+  if (T.open < 1) return;
+  rect(x0 + 1, y0 + 1, ww - 2, 5, C.hz1);
+  pset(x0 + 3, y0 + 3, C.cRed); pset(x0 + 6, y0 + 3, C.cYel); pset(x0 + 9, y0 + 3, C.cGrn);
+  let y = y0 + 8;
+  for (const L of T.lines) {
+    const n = Math.floor((t - L.t0) * 26);
+    if (n <= 0) break;
+    drawText(L.text.slice(0, n), x0 + 3, y, L.c);
+    y += 7;
+    if (L.bar) {
+      const p = clamp((t - L.bar[0]) / (L.bar[1] - L.bar[0]), 0, 1), bw = ww - 8;
+      rect(x0 + 3, y, bw + 2, 4, C.hz2); rect(x0 + 4, y + 1, bw, 2, C.hz0);
+      rect(x0 + 4, y + 1, Math.round(bw * p), 2, p >= 1 ? C.cGrn : C.cYel);
+      y += 6;
+    }
+  }
+  if ((Math.floor(t * 3) & 1) && y < y0 + hh - 6) rect(x0 + 3, y, 3, 5, C.hz4);
+}
+const GLYPHS = ['{', '}', '<', '>', '/', ';', '=', '+', '*', '0', '1', '(', ')', '[', ']'];
+const GLYPH_COLS = [C.hz3, C.hz4, C.cGrn, C.cYel, C.cPur, C.cOra];
+
+// ---- 3. Clawd runs into the woods
+SCENES.push({
+  name: 'forest', dur: 8.2, tin: 'wipe', tinDur: .6, tout: 'white', toutDur: .7,
+  init(S) {
+    S.set = once('forest', buildForest);
+    const c = S.clawd = newClawd(-8, 100);
+    c.run = true; c.speed = 50; c.tx = 1000; c.faceBase = 'determined';
+    S.cam.x = -44; S.dustC = PATH_C[3];
+    S.logX = 158; S.glowK = 0;
+    S.focus = [48, 60];
+  },
+  update(S, dt) {
+    const c = S.clawd, t = S.t;
+    if (!S.jumped && c.x > S.logX - 28) { S.jumped = true; jump(c, 125, 70); }
+    if (c.air && !S.joy) { S.joy = true; express(c, 'joy', .7); }
+    if (at(6.0)) { c.run = false; c.tx = c.x + 12; c.speed = 24; c.arms = ['out', 'out']; c.legsO = [2, 2, 3, 3]; c.faceBase = 'surprised'; S.skid = true; }
+    if (S.skid && c.moving && rnd() < .5) puff(c.x + 7, c.y, 1);
+    if (at(6.6)) { c.arms = null; c.legsO = null; emote(c, 'bang', 1.4); c.look = [1, 0]; }
+    if (rnd() < dt * 2.5) emit({ type: 'leaf', x: S.cam.x + rr(0, 110), y: -2, vx: rr(-8, 4), vy: rr(10, 18), life: 7, c: C.h6, c2: C.h5, ph: rr(0, 3), z: 2, upd: p => { p.vx += Math.sin(p.t * 3 + p.ph) * .6; } });
+    S.cam.x += (c.x - 36 - S.cam.x) * (1 - Math.exp(-dt * 5));
+    S.glowK = prog(t, 3.6, 7.8);
+    updClawd(c, dt);
+  },
+  draw(S) {
+    const set = S.set, c = S.clawd, cx = S.cam.x + S.ox, cy = S.cam.y + S.oy, t = S.t;
+    drawForest(set, S);
+    blit(PROP.log, S.logX - 9 - cx, 95 - cy);
+    drawActor(c, cx, cy, PATH_C[1]);
+    drawParts(1, cx, cy);
+    if (c.run && c.moving) for (let i = 0; i < 3; i++) {
+      const y = c.y - cy - 4 - i * 4 + ((Math.floor(t * 20) + i) % 3), x = c.x - cx - 14 - ((t * 90 + i * 17) % 20);
+      line(x, y, x + 5, y, C.f5);
+    }
+    drawLayer(set.fg, -cx * 1.35, 98 - cy);
+    drawFlies(set.flies, cx, cy, t, 192);
+    const k = S.glowK;
+    if (k > 0) {
+      glow(W + 14, 80, 40 + 70 * k, C.st3, .75 * k, 9, false);
+      glow(W + 6, 84, 14 + 20 * k, C.white, .5 * k, 5, false);
+    }
+    drawParts(2, cx, cy);
+  },
+});
+
+// ---- 4. a little star, lost and broken
+SCENES.push({
+  name: 'meet', dur: 14.6, tin: 'white', tinDur: .9, tout: 'cut',
+  init(S) {
+    S.set = once('clearing', buildClearing);
+    const c = S.clawd = newClawd(-14, 99);
+    c.faceBase = 'worried'; c.speed = 15;
+    const s = S.star = newStar(64, 99);
+    s.faceBase = 'cry'; s.glowK = .5; s.glowR = 16;
+    S.shards = [[76, 100, 0], [53, 101, 2]];
+    S.dustC = C.h4;
+    S.focus = [48, 80];
+  },
+  update(S, dt) {
+    const c = S.clawd, s = S.star, t = S.t;
+    if (t < 5 && Math.floor(t * 2.6) !== Math.floor(S.pt * 2.6)) {
+      s.sqv -= 3;
+      emit({ type: 'tear', x: s.x - 2 + rr(-1, 0), y: s.y - 6, vx: -rr(6, 14), vy: -rr(8, 16), ay: 200, life: .7, z: 2 });
+      emit({ type: 'tear', x: s.x + 2 + rr(0, 1), y: s.y - 6, vx: rr(6, 14), vy: -rr(8, 16), ay: 200, life: .7, z: 2 });
+    }
+    if (at(.7)) c.tx = 30;
+    if (at(3.1)) { emote(c, 'what', 1.4); c.faceBase = 'normal'; c.look = [1, 0]; }
+    if (at(3.4)) caption('A LITTLE STAR HAD\nLOST ITS POINT...', 4.6);
+    if (at(4.4)) { c.tx = 40; c.speed = 9; }
+    if (at(5.1)) {
+      s.faceBase = 'scared'; emote(s, 'bang', 1); hop(s, 75, 16);
+      s.onLand = () => { s.shake = 2.6; };
+      c.tx = null;
+    }
+    if (at(5.5)) { c.faceBase = 'worried'; emote(c, 'sweat', 1.4); c.look = null; }
+    if (at(6.6)) { c.faceBase = 'smile'; c.wave = 1; }
+    if (at(7.2)) emote(c, 'heart', 1.4);
+    if (at(8.2)) { c.wave = 0; s.faceBase = 'sad'; s.shake = 0; }
+    if (at(8.9)) { s.faceBase = 'wow'; S.tryT = 0; }
+    if (S.tryT != null) {
+      const k = S.tryT += dt;
+      if (k < 1) { s.lift = E.out(k) * 9; s.glowK = .45 + k * .6; s.glowR = 14 + k * 8; }
+      else if (k < 1.8) { s.glitch = 1; s.lift = 9 + Math.sin(k * 40); if (Math.floor(k * 10) !== Math.floor((k - dt) * 10)) S.shake = 1; }
+      else if (k < 2.3) { s.glitch = Math.max(0, 1 - (k - 1.8) * 3); s.lift = Math.max(0, 9 - (k - 1.8) * 40); s.glowK = .35; s.glowR = 12; s.faceBase = 'cry'; }
+      else { s.glitch = 0; s.lift = 0; if (!S.dropped) { S.dropped = true; s.sqv -= 6; puff(s.x, s.y, 2); } }
+    }
+    if (at(10.3)) caption('...AND ITS LIGHT\nHAD A BUG!', 3.8);
+    if (at(10.9)) { c.faceBase = 'teary'; c.look = [1, 0]; }
+    if (at(12.7)) { c.faceBase = 'determined'; S.glint = 0; c.arms = ['up', 'up']; jump(c, 70); }
+    if (at(13.4)) c.arms = null;
+    if (S.glint != null) S.glint += dt;
+    S.cam.x = lerp(-4, 4, E.inOut(prog(t, 0, 14.6)));
+    updClawd(c, dt); updStar(s, dt);
+  },
+  draw(S) {
+    const set = S.set, c = S.clawd, s = S.star, cx = S.cam.x + S.ox, cy = S.cam.y + S.oy, t = S.t;
+    drawClearingBack(set, S);
+    drawShards(S, cx, cy);
+    drawStarActor(s, cx, cy, t);
+    drawActor(c, cx, cy, C.h3);
+    if (S.glint != null && S.glint < .5 && c.box) sparkle(c.box.left + c.box.w - 6, c.box.top + 3, 3 * Math.sin(S.glint / .5 * Math.PI), C.white);
+    drawParts(1, cx, cy);
+    drawClearingFront(set, S);
+    drawParts(2, cx, cy);
+  },
+});
+
+// ---- 5. debug time!
+SCENES.push({
+  name: 'debug', dur: 18.2, tin: 'cut', tout: 'iris', toutDur: .8,
+  init(S) {
+    S.set = once('clearing', buildClearing);
+    const c = S.clawd = newClawd(40, 99);
+    c.faceBase = 'determined'; c.look = [1, 0];
+    const s = S.star = newStar(71, 99);
+    s.faceBase = 'sad'; s.glowK = .45; s.glowR = 15;
+    S.shards = [[80, 100, 0], [53, 101, 2]];
+    S.dustC = C.h4;
+    S.term = { x: 11, y: 10, w: 74, h: 46, open: 0, lines: [] };
+    S.focus = [56, 84];
+    S.flash = 1;
+  },
+  update(S, dt) {
+    const c = S.clawd, s = S.star, t = S.t, T = S.term;
+    if (t < 3) {
+      if (at(.5)) S.shake = 2.5;
+      if (at(.75)) say(CUTIN_WHO, 'LEAVE IT TO ME!', 2.2);
+      return;
+    }
+    if (at(3)) S.flash = .9;
+    if (at(3.4)) { c.arms = ['up', 'up']; c.sqBase = .3; burst(40, 82, 10, [C.hz3, C.hz4], 30, 2, .6); }
+    if (t > 3.6 && t < 10.9) T.open = prog(t, 3.6, 4.3);
+    if (at(4.3)) T.lines.push({ text: '> DEBUG STAR.JS', c: C.hz4, t0: t });
+    if (at(4.6)) { c.arms = null; c.sqBase = 0; }
+    if (t > 4.6 && t < 6) s.lift = E.inOut(prog(t, 4.6, 6)) * 26;
+    if (at(4.8)) { s.faceBase = 'wow'; }
+    if (at(5.3)) { c.typing = 2; c.faceBase = 'squint'; emote(c, 'sweat', 5.5); }
+    if (at(5.7)) T.lines.push({ text: '1 BUG FOUND!', c: C.cRed, t0: t });
+    if (at(6.5)) T.lines.push({ text: 'PATCHING...', c: C.cYel, t0: t, bar: [6.7, 10.1] });
+    if (t > 6.7 && t < 10.1) s.fix = prog(t, 6.7, 10.1);
+    if (t > 5.3 && t < 10.5) {
+      if (rnd() < dt * 14) {
+        const side = rnd() < .5 ? -9 : 9;
+        emit({ type: 'glyph', ch: pick(GLYPHS), x: c.x + side, y: c.y - 8, vx: (s.x - c.x - side) * rr(.8, 1.1), vy: -rr(28, 40), life: .9, c: pick(GLYPH_COLS), z: 2 });
+      }
+      if (t > 6.7 && rnd() < dt * 8) emit({ type: 'spark', x: s.x + rr(-2, 2), y: s.y - s.lift - 12 + rr(-1, 2), vx: rr(-16, 16), vy: rr(-16, 4), drag: 2, life: .5, s: 2, c: C.st3, z: 2 });
+    }
+    if (at(10.3)) T.lines.push({ text: '✓ ALL FIXED!', c: C.cGrn, t0: t });
+    if (at(10.9)) {
+      s.broken = false; s.dim = 0; s.fix = 0; s.glowK = 1; s.glowR = 26; s.faceBase = 'wow';
+      S.flash = 1; S.shake = 2; S.rays = 0;
+      burst(s.x, s.y - s.lift - 6, 40, [C.st3, C.st2, C.white, C.st4], 70, 2, 1.3);
+      emit({ type: 'ring', x: s.x, y: s.y - s.lift - 6, s: 44, life: 1, c: C.st3, z: 2 });
+      c.typing = 0; c.faceBase = 'surprised'; c.emote = null;
+      emote(s, 'check', 1.4);
+    }
+    if (t > 10.9) T.open = 1 - prog(t, 10.9, 11.3);
+    if (S.rays != null) S.rays += dt;
+    if (at(11.5)) { s.faceBase = 'joy'; c.faceBase = 'joy'; jump(c, 125); hearts(c.x, c.y - 16, 3); }
+    if (t > 11.5 && t < 13) s.lift = 26 + Math.sin((t - 11.5) * 9) * 3;
+    if (at(12.2)) { emit({ type: 'icon', icon: 'note', x: s.x + 8, y: s.y - s.lift - 14, vy: -14, life: 1.4, z: 2 }); jump(c, 90); }
+    if (t > 13 && t < 13.8) s.lift = lerp(26, 0, E.inOut(prog(t, 13, 13.8)));
+    if (t > 12.5) { s.glowK = lerp(1, .5, prog(t, 12.5, 14)); s.glowR = lerp(26, 16, prog(t, 12.5, 14)); }
+    if (at(13.9)) {
+      s.face2 = 'happy'; s.faceT = 1;
+      hop(s, 150, (c.x - s.x) / .75); s.gy = clawdTop(c) + 1;
+      s.onLand = () => { s.ride = c; c.sqv -= 4; express(c, 'flustered', 1.5); emote(c, 'heart', 1.5); };
+    }
+    if (s.air && t > 13.9) s.gy = clawdTop(c) + 1;
+    if (at(15.4)) { s.ride = null; s.gy = s.y; S.fly = 0; c.faceBase = 'smile'; c.look = [0, -1]; }
+    if (S.fly != null) {
+      const k = S.fly += dt;
+      if (k < 1.1) s.lift = E.out(k / 1.1) * 30;
+      else if (k < 1.9) { s.lift = 30 + Math.sin(k * 30) * .8; s.faceBase = 'scared'; s.shake = .1; if (at(16.6)) emote(s, 'sweat', 1); }
+      else if (k < 2.9) { s.lift = lerp(30, 0, E.inOut((k - 1.9) / 1)); s.faceBase = 'sad'; }
+      else if (!S.back) { S.back = true; s.ride = c; s.lift = 0; c.sqv -= 3; c.faceBase = 'sad'; c.look = [0, -1]; }
+    }
+    S.cam.x = lerp(4, -4, E.inOut(prog(t, 3, 18.2)));
+    updClawd(c, dt); updStar(s, dt);
+  },
+  draw(S) {
+    const set = S.set, c = S.clawd, s = S.star, cx = S.cam.x + S.ox, cy = S.cam.y + S.oy, t = S.t;
+    if (t < 3) { drawCutIn(S, t); return; }
+    drawClearingBack(set, S);
+    drawShards(S, cx, cy);
+    if (S.rays != null && !s.ride) {
+      const k = Math.max(.25, 1 - S.rays / 2.5), sx = s.x - cx, sy = s.y - s.lift - 6 - cy;
+      for (let i = 0; i < 10; i++) {
+        const a = i / 10 * TAU + S.rays * .6;
+        lineAdd(sx, sy, sx + Math.cos(a) * 60, sy + Math.sin(a) * 60, C.st3, .14 * k);
+      }
+    }
+    if (!s.ride) drawStarActor(s, cx, cy, t);
+    drawActor(c, cx, cy, C.h3);
+    if (s.ride) drawStarActor(s, cx, cy, t);
+    if (S.term.open > 0 && t < 10.9 && t > 4.6) {
+      const n = GLYPHS.length;
+      for (let i = 0; i < 8; i++) {
+        const a = t * 1.6 + i / 8 * TAU, gx = s.x - cx + Math.cos(a) * 15, gy = s.y - s.lift - 6 - cy + Math.sin(a) * 6;
+        drawText(GLYPHS[(i * 5 + Math.floor(t * 2)) % n], gx - 1, gy - 2, GLYPH_COLS[i % 6]);
+      }
+    }
+    drawParts(1, cx, cy);
+    drawClearingFront(set, S);
+    drawTerminal(S.term, t);
+    drawParts(2, cx, cy);
+  },
+});
+
+// ---------------------------------------------------------------- scenery: the long climb
+const pathY = x => 104 - x * .19;
+function buildPath() {
+  const set = {};
+  set.stars = makeStars(41, 110, -40, 140, -110, 70);
+  set.clouds = layer(192, 70, L => {
+    const r = mulberry(51), puffs = [];
+    for (let i = 0; i < 16; i++) puffs.push([i * 12 + r() * 8, 18 + r() * 34, 7 + r() * 9]);
+    for (const [x, y, rad] of puffs) wrapDraw(192, x, 20, X => { disc(X, y, rad, C.cd2); disc(X + rad * .8, y + 3, rad * .75, C.cd2); disc(X - rad * .8, y + 4, rad * .7, C.cd2); });
+    rect(0, 46, 192, 24, C.cd2);
+    rimLayer(L, C.cd1, 0, 2, C.cd2);
+    rimLayer(L, C.cd3, 0, -1, C.cd2);
+    rimLayer(L, C.cd4, 0, -1, C.cd3);
+  });
+  const hr = ridge(57, 192, 22, [[2, 6], [3, 4], [7, 2]]);
+  set.hills = layer(192, 90, L => {
+    for (let x = 0; x < 192; x++) rect(x, Math.round(hr[x]), 1, 90, C.h2);
+    const r = mulberry(58);
+    for (let i = 0; i < 22; i++) { const x = r() * 192, b = Math.round(hr[Math.floor(x)]) + 2, hh = 5 + r() * 6; wrapDraw(192, x, 6, X => pine(X, b, hh, 4, C.h1)); }
+    rimLayer(L, C.h3, 0, -1, C.h2);
+  });
+  set.ground = layer(420, 180, L => {
+    for (let x = 0; x < 420; x++) {
+      const wx = x - 40, top = Math.round(pathY(wx)) + 40;
+      for (let y = Math.max(0, top); y < 180; y++) {
+        const d = y - top, hs = hash2(wx, y + 77);
+        let c = d < 1 ? C.h8 : d < 2 ? C.h7 : d < 5 ? C.h6 : C.h5;
+        if (d >= 3 && hs < .08) c = C.h7;
+        else if (d >= 5 && hs > .9) c = C.h4;
+        if (d > 12 && bay(x, y) < (d - 12) / 14) c = C.h4;
+        if (d > 26) c = bay(x, y) < (d - 26) / 20 ? C.h3 : C.h4;
+        pset(x, y, c);
+      }
+      if (hash2(wx, 5) < .4) pset(x, top - 1, C.h6);
+      if (hash2(wx, 6) < .14) { pset(x, top - 1, C.h7); pset(x, top - 2, C.h6); }
+    }
+    const r = mulberry(61);
+    for (let i = 0; i < 60; i++) {
+      const wx = -40 + r() * 420, y = Math.round(pathY(wx)) + 40 + 2 + Math.floor(r() * 16);
+      pset(wx + 40, y, [C.pk1, C.white, C.st3, C.pk0, C.cPur][i % 5]);
+    }
+    for (let i = 0; i < 9; i++) {
+      const wx = -20 + r() * 380, y = Math.round(pathY(wx)) + 40 + 3 + Math.floor(r() * 10);
+      rect(wx + 40, y, 4, 2, C.h3); rect(wx + 41, y - 1, 2, 1, C.h4);
+    }
+  });
+  set.plantX = 80;
+  return set;
+}
+function rainDrop(S) {
+  const x = S.cam.x + rr(-10, 130), y = S.cam.y - 6;
+  emit({
+    type: 'rain', x, y, vx: -34, vy: rr(150, 175), life: 2, z: 2,
+    upd: p => {
+      const lf = S.leaf;
+      if (lf && p.x > lf.x && p.x < lf.x + 21 && p.y > lf.y && p.y < lf.y + 4) { splash(p.x, lf.y, 2); p.dead = true; }
+      else if (p.y >= pathY(p.x)) { splash(p.x, pathY(p.x), 2); p.dead = true; }
+    },
+  });
+}
+function splash(x, y, n) {
+  for (let i = 0; i < n; i++) emit({ type: 'px', x, y: y - 1, vx: rr(-18, 18), vy: -rr(14, 30), ay: 260, life: .3, c: C.rn1, z: 2 });
+}
+
+// ---- 6. the long way home
+SCENES.push({
+  name: 'climb', dur: 16.4, tin: 'iris', tinDur: .8, tout: 'fade', toutDur: .9,
+  init(S) {
+    S.set = once('path', buildPath);
+    const c = S.clawd = newClawd(4, pathY(4));
+    c.ground = pathY; c.speed = 15; c.tx = S.set.plantX - 6; c.faceBase = 'smile';
+    const s = S.star = newStar(4, 0);
+    s.broken = false; s.dim = 0; s.ride = c; s.faceBase = 'normal'; s.glowK = .45; s.glowR = 15;
+    S.cloudK = 0; S.rain = 0; S.leaf = null; S.leafState = 'plant';
+    S.dustC = C.h6;
+    S.cam.x = c.x - 40; S.cam.y = pathY(c.x) - 98;
+    S.focus = [44, 84];
+  },
+  update(S, dt) {
+    const c = S.clawd, s = S.star, t = S.t;
+    if (at(.5)) caption('THE SKY WAS SO FAR...\nSO THEY CLIMBED!', 4.6);
+    S.cloudK = t < 10.4 ? prog(t, 2.2, 4.2) : 1 - prog(t, 10.4, 13);
+    S.rain = t < 10.4 ? prog(t, 3, 4.6) : 1 - prog(t, 10.4, 11.4);
+    if (rnd() < S.rain * dt * 70) rainDrop(S);
+    if (rnd() < S.rain * dt * 70) rainDrop(S);
+    if (at(4.2)) { s.faceBase = 'scared'; s.shake = 1.4; c.faceBase = 'worried'; emote(c, 'sweat', 1.4); }
+    if (!c.moving && c.tx == null && S.leafState === 'plant' && t > 4) {
+      S.leafState = 'held'; c.arms = ['rest', 'high']; c.sqv += 3;
+      burst(c.x + 10, c.y - 20, 6, [C.lf3, C.lf4], 20, 2, .5);
+    }
+    if (S.leafState === 'held' && !S.walk2) { S.walk2 = t + .9; }
+    if (S.walk2 && at(S.walk2)) { c.tx = 300; c.faceBase = 'content'; s.faceBase = 'happy'; s.shake = 0; emote(s, 'heart', 1.4); }
+    if (at(7.4)) caption('RAIN OR SHINE, TOGETHER.', 3.8);
+    if (at(8.4)) emote(c, 'note', 1.4);
+    if (at(11.7)) {
+      S.leafState = 'gone'; c.arms = null; c.shake = .5; c.faceBase = 'happy';
+      emit({ type: 'leafy', x: S.leaf.x, y: S.leaf.y, vx: -22, vy: -18, ay: 30, life: 3, z: 2 });
+      for (let i = 0; i < 8; i++) emit({ type: 'px', x: c.x + rr(-10, 10), y: c.y - rr(4, 14), vx: rr(-30, 30), vy: -rr(10, 30), ay: 220, life: .5, c: C.rn1, z: 2 });
+    }
+    if (at(12.6)) { c.faceBase = 'sparkle'; c.look = [0, -1]; s.faceBase = 'wow'; }
+    if (at(14.2)) { c.look = null; c.faceBase = 'smile'; }
+    S.leaf = S.leafState === 'held' ? { x: c.x - 8, y: clawdTop(c) - 16 } : null;
+    S.cam.x += (c.x - 40 - S.cam.x) * (1 - Math.exp(-dt * 4));
+    S.cam.y += (pathY(c.x) - 98 - S.cam.y) * (1 - Math.exp(-dt * 4));
+    updClawd(c, dt); updStar(s, dt);
+  },
+  draw(S) {
+    const set = S.set, c = S.clawd, s = S.star, cx = S.cam.x + S.ox, cy = S.cam.y + S.oy, t = S.t;
+    const dark = S.cloudK;
+    skyGrad([[-160, C.n0], [-90, C.n1], [-30, C.n2], [10, C.n3], [40, C.n4], [70, C.n5], [100, C.n6]], cy * .15);
+    drawStars(set.stars, cx * .1, cy * .15, t, 1 - dark);
+    const mx = 58 - cx * .1, my = -2 - cy * .15;
+    glow(mx + 6.5, my + 6.5, 20, C.mo1, .14, 7, false);
+    blit(MOON, mx, my);
+    drawLayer(set.hills, -cx * .35, 58 - cy * .4);
+    if (dark > 0) {
+      // storm clouds sink into view, then lift away again
+      const lift = (1 - E.inOut(dark)) * 90;
+      drawLayer(set.clouds, -cx * .15 + t * 2, -26 - lift * 1.2 - cy * .1);
+      drawLayer(set.clouds, -cx * .22 - t * 3 + 60, -14 - lift - cy * .12);
+    }
+    drawLayer(set.ground, -40 - cx, -40 - cy, false);
+    const px = set.plantX - cx, py = pathY(set.plantX) - cy;
+    blit(PROP.sprout, px - 4, py - 7);
+    if (S.leafState === 'plant') { line(px, py - 7, px, py - 14, C.stem); blit(PROP.leafTop, px - 10, py - 21); }
+    drawActor(c, cx, cy, C.h4);
+    drawStarActor(s, cx, cy, t);
+    if (S.leaf) {
+      const hx = c.box.left + c.box.w, hy = c.box.top + 1;
+      line(S.leaf.x + 10 - cx, S.leaf.y + 6 - cy, hx - 1, hy, C.stem);
+      blit(PROP.leafTop, S.leaf.x - cx, S.leaf.y - cy);
+    }
+    drawParts(1, cx, cy);
+    for (const p of PARTS) if (p.type === 'leafy') blit(PROP.leafTop, p.x - cx, p.y - cy, Math.floor(p.t * 4) & 1);
+    drawParts(2, cx, cy);
+    if (dark > 0) brect(0, 0, W, H, C.cd0, .22 * dark);
+    drawFgGrass(cx, cy, t, C.h1, 3, 124, 1.2);
+  },
+});
+
+// ---- 7. goodbye at sunrise
+const DAWN_A = [C.n0, C.n1, C.n3, C.n5, C.n7, C.d0, C.d1, C.d2];
+const DAWN_B = [C.n3, C.n5, C.d0, C.d1, C.d2, C.d3, C.d4, C.d5];
+const DAWN_Y = [-130, -60, -12, 16, 40, 58, 72, 86];
+function dawnStops(p) { return DAWN_Y.map((y, i) => [y, mix(DAWN_A[i], DAWN_B[i], p)]); }
+function buildSeaOfClouds() {
+  return layer(192, 26, L => {
+    const r = mulberry(73), puffs = [];
+    for (let i = 0; i < 20; i++) puffs.push([i * 9.6 + r() * 6, 8 + r() * 6, 4 + r() * 5]);
+    for (const [x, y, rad] of puffs) wrapDraw(192, x, 12, X => { disc(X, y, rad, C.d1); disc(X + rad, y + 2, rad * .8, C.d1); });
+    rect(0, 12, 192, 14, C.d1);
+    rimLayer(L, C.d3, 0, -1, C.d1);
+    rimLayer(L, C.d5, 0, -1, C.d3);
+  });
+}
+SCENES.push({
+  name: 'farewell', dur: 21, tin: 'fade', tinDur: 1, tout: 'fade', toutDur: 1.2,
+  init(S) {
+    S.set = once('hillNight', () => buildHill('night'));
+    S.sea = once('sea', buildSeaOfClouds);
+    const c = S.clawd = newClawd(42, 98);
+    c.faceBase = 'smile';
+    const s = S.star = newStar(42, 0);
+    s.broken = false; s.dim = 0; s.ride = c; s.faceBase = 'happy'; s.glowK = .5; s.glowR = 16;
+    S.dp = 0; S.skyStar = null;
+    S.dustC = C.h6;
+    S.focus = [48, 60];
+  },
+  update(S, dt) {
+    const c = S.clawd, s = S.star, t = S.t;
+    S.lb = E.inOut(prog(t, .2, 1.4)) * (1 - prog(t, 19.4, 20.6));
+    S.dp = E.inOut(prog(t, 1, 19));
+    S.cam.x = lerp(-3, 4, prog(t, 0, 21));
+    if (at(1.4)) { s.ride = null; s.gy = 98; hop(s, 110, 30); s.onLand = () => { s.face2 = 'joy'; s.faceT = .6; }; }
+    if (at(2.3)) S.rise = [2.3, 3.1, 0, 17];
+    if (at(3.2)) say(s, 'THANK YOU, CLAWD!', 2.6);
+    if (at(3.6)) { c.faceBase = 'smile'; c.look = [1, 0]; emote(c, 'heart', 1.2); }
+    if (at(6.0)) S.zip = t;
+    if (S.zip != null) {
+      const k = t - S.zip;
+      if (k < .35) s.x = lerp(58, c.x + 10, E.in(k / .35));
+      else if (k < .5) { if (!S.booped) { S.booped = true; hearts(c.x + 6, c.y - 16, 4); jump(c, 80); c.faceBase = 'love'; S.flash = .25; S.flashC = C.pk1; } }
+      else if (k < 1.1) s.x = lerp(c.x + 10, 60, E.out((k - .5) / .6));
+      else S.zip = null;
+    }
+    if (at(7.8)) { c.faceBase = 'flustered'; }
+    if (at(8.6)) { c.faceBase = 'smile'; c.look = [1, -1]; }
+    if (at(8.8)) S.rise = [8.8, 12.6, 17, 66];
+    if (S.rise) {
+      const [a, b, l0, l1] = S.rise;
+      s.lift = lerp(l0, l1, E.inOut(prog(t, a, b)));
+      if (t > 8.8 && t < 12.6 && rnd() < .6) emit({ type: rnd() < .5 ? 'spark' : 'glow', x: s.x + rr(-3, 3), y: s.y - s.lift - 5 + rr(-2, 2), vx: rr(-4, 4), vy: rr(2, 10), life: rr(.6, 1.2), s: rr(1, 2.4), c: pick([C.st3, C.st4, C.white]), z: 1 });
+    }
+    if (at(9.2)) { c.wave = 2; say(c, 'BYE BYE!', 2.2); }
+    if (at(12.7)) { S.skyStar = { x: s.x, y: s.y - s.lift - 6, t: 0 }; s.vis = false; S.flash = .35; S.flashC = C.st4; burst(s.x, s.y - s.lift - 6, 20, [C.st3, C.white], 40, 2, .9); }
+    if (S.skyStar) S.skyStar.t += dt;
+    if (at(13.6)) { c.faceBase = 'cry'; c.wave = 1; c.look = null; c.sqv -= 3; }
+    if (at(15.2)) { c.faceBase = 'teary'; c.look = [0, -1]; }
+    if (t > 14 && t < 17 && Math.floor(t * 3) !== Math.floor(S.pt * 3)) {
+      emit({ type: 'tear', x: c.x - 5, y: c.y - 8, vx: -rr(8, 14), vy: -rr(10, 20), ay: 220, life: .8, z: 2 });
+      emit({ type: 'tear', x: c.x + 5, y: c.y - 8, vx: rr(8, 14), vy: -rr(10, 20), ay: 220, life: .8, z: 2 });
+    }
+    if (at(15)) caption('GOODBYE, LITTLE STAR.', 4);
+    if (at(17.2)) { c.faceBase = 'smile'; c.wave = 0; c.look = [0, -1]; }
+    if (at(18.6)) { c.look = null; express(c, 'content', 2); }
+    if (t > 12 && rnd() < dt * 3) emit({ type: 'petal', x: S.cam.x - 4, y: rr(20, 100), vx: rr(14, 24), vy: rr(-2, 5), life: 7, ph: rr(0, 3), z: 2, upd: p => { p.vy += Math.sin(p.t * 2.2 + p.ph) * .5; } });
+    updClawd(c, dt); updStar(s, dt);
+  },
+  draw(S) {
+    const set = S.set, c = S.clawd, s = S.star, cx = S.cam.x + S.ox, cy = S.cam.y + S.oy, t = S.t;
+    const k = Math.round(S.dp * 8) / 8, P = HILL_PAL.night, D = HILL_PAL.dawn;
+    const pairs = [[P.mb, D.mb], [P.mbr, D.mbr], [P.mf, D.mf], [P.mfr, D.mfr], [P.mid, D.mid], [P.midr, D.midr], [P.tree, D.tree], [P.hill, D.hill], [P.hd, D.hd], [P.hl, D.hl], [P.rim, D.rim], [P.tuft, D.tuft]];
+    const tset = {
+      P: { hd: mix(P.hd, D.hd, k), fg: mix(P.fg, D.fg, k) },
+      mount: tinted(set.mount, pairs, k, 'm'), mid: tinted(set.mid, pairs, k, 'mid'), hill: tinted(set.hill, pairs, k, 'h'),
+      haze: set.haze, stars: set.stars, window: set.window, flies: set.flies,
+    };
+    const sunY = lerp(98, 50, E.out(prog(t, 9.5, 21)));
+    drawHill(tset, S, {
+      sky: dawnStops(S.dp), starA: 1 - prog(S.dp, .35, .9), moon: [8, lerp(14, 30, S.dp)], flies: false,
+      sky2: (ox, oy) => {
+        if (S.skyStar) {
+          const st = S.skyStar, a = 1 - prog(t, 19, 21) * .6;
+          skyStar(st.x - ox, st.y - oy, Math.max(.4, 1 - st.t / 2) * a, t);
+        }
+        glow(70 - ox, sunY - oy, 26 + 20 * S.dp, C.d5, .5 * S.dp, 8, false);
+        disc(70 - ox, sunY - oy, 7, C.sun);
+      },
+      behindMid: (ox, oy) => drawLayer(tinted(S.sea, [[C.d1, C.n5], [C.d3, C.n7], [C.d5, C.d1]], 1 - k, 'sea'), -ox * .4 + t * 1.5, 72 - oy * .5),
+    });
+    drawActor(c, cx, cy, tset.P.hd);
+    drawStarActor(s, cx, cy, t);
+    drawParts(1, cx, cy);
+    drawFgGrass(cx, cy, t, tset.P.fg);
+    drawParts(2, cx, cy);
+  },
+});
+
+// ---- 8. the next night
+const CONSTELLATION = [[3, 0], [15, 0], [15, 4], [17, 4], [17, 6], [15, 6], [15, 8], [13.5, 8], [13.5, 10], [13.5, 8], [11.5, 8], [11.5, 10], [11.5, 8], [6.5, 8], [6.5, 10], [6.5, 8], [4.5, 8], [4.5, 10], [4.5, 8], [3, 8], [3, 6], [1, 6], [1, 4], [3, 4], [3, 0]];
+const CON_EYES = [[5.5, 2.5], [12.5, 2.5]];
+const conPt = ([x, y]) => [48 + (x - 9) * 2.4, 40 + (y - 5) * 2.4];
+SCENES.push({
+  name: 'epilogue', dur: 16.4, tin: 'fade', tinDur: .8, tout: 'clawd', toutDur: 2.2,
+  init(S) {
+    S.set = once('hillNight', () => buildHill('night'));
+    const c = S.clawd = newClawd(48, 98);
+    c.sit = true; c.typing = 1; c.look = [0, 1];
+    S.laptop = true; S.con = -1;
+    S.focus = [48, 88];
+  },
+  update(S, dt) {
+    const c = S.clawd, t = S.t;
+    if (at(.3)) caption('THE NEXT NIGHT...', 2.4, 'mid');
+    if (at(3.6)) S.con = 0;
+    if (S.con >= 0) S.con += dt;
+    if (at(4.2)) { c.typing = 0; c.look = [0, -1]; c.faceBase = 'surprised'; emote(c, 'bang', 1.2); }
+    if (at(5.6)) c.faceBase = 'sparkle';
+    if (at(8.2)) { c.sit = false; c.faceBase = 'joy'; jump(c, 115); hearts(c.x, c.y - 18, 4); c.tint = null; S.laptop = 'shut'; }
+    if (at(9.2)) caption('NOW, EVERY NIGHT,\nA STAR SAYS HELLO.', 4.4);
+    if (at(9.6)) { c.wave = 3; c.faceBase = 'joy'; }
+    if (at(12.3)) { c.wave = 0; c.sit = true; c.faceBase = 'smile'; S.laptop = true; c.typing = 1; c.look = [0, 1]; }
+    if (at(13.4)) emote(c, 'heart', 1.6);
+    if (at(14.7)) { c.typing = 0; c.look = [0, 0]; c.faceBase = 'wink'; }
+    c.tint = S.laptop === true && !c.air ? [C.hz3, .2] : null;
+    S.cam.x = lerp(3, -3, E.inOut(prog(t, 0, 16.4)));
+    updClawd(c, dt);
+  },
+  draw(S) {
+    const c = S.clawd, set = S.set, cx = S.cam.x + S.ox, cy = S.cam.y + S.oy, t = S.t;
+    drawHill(set, S, {
+      sky2: () => {
+        if (S.con < 0) { skyStar(70, 26, .6, t); return; }
+        const k = S.con, n = CONSTELLATION.length, shown = k * 7;
+        for (let i = 0; i < n - 1; i++) {
+          const f = clamp(shown - i, 0, 1);
+          if (f <= 0) break;
+          const [x0, y0] = conPt(CONSTELLATION[i]), [x1, y1] = conPt(CONSTELLATION[i + 1]);
+          lineAdd(x0, y0, lerp(x0, x1, f), lerp(y0, y1, f), STAR_MID, .45);
+        }
+        for (let i = 0; i < n; i++) if (shown >= i) {
+          const [x, y] = conPt(CONSTELLATION[i]);
+          sparkle(x, y, 1.2 + .8 * Math.sin(t * 3 + i), STAR_MID);
+        }
+        if (shown > n) {
+          const e = clamp((shown - n) / 3, 0, 1);
+          const [lx, ly] = conPt(CON_EYES[0]), [rx, ry] = conPt(CON_EYES[1]);
+          sparkle(lx, ly, 2 * e, STAR_MID);
+          const wink = t > 10.5 && t < 11.1 && Math.floor(t * 8) & 1;
+          if (!wink) { glow(rx, ry, 6, C.st3, .45 * e, 5, false); flare(rx, ry, Math.round(3 * e + Math.sin(t * 5)), C.st3, .7 * e); }
+        }
+        if (k < 1.2) skyStar(lerp(70, conPt(CON_EYES[1])[0], E.inOut(clamp(k / 1.2, 0, 1))), lerp(26, conPt(CON_EYES[1])[1], E.inOut(clamp(k / 1.2, 0, 1))), .7, t);
+      },
+    });
+    drawActor(c, cx, cy, set.P.hd);
+    if (S.laptop === true) { laptopGlow(c, cx, cy); blit(PROP.laptop, 41 - cx, 93 - cy); }
+    else blit(PROP.laptopShut, 41 - cx, 99 - cy);
+    drawFgGrass(cx, cy, t, set.P.fg);
+    drawParts(1, cx, cy); drawParts(2, cx, cy);
+    if (t < 3) brect(0, 0, W, H, C.black, 1 - prog(t, 2, 3));
+  },
+});
+
+// ---- 9. the end
+SCENES.push({
+  name: 'end', dur: 0, tin: 'fade', tinDur: 1.2, tout: 'fade', toutDur: .8,
+  init(S) {
+    S.stars = once('endStars', () => makeStars(77, 90, 0, 96, 0, 120));
+    const c = S.clawd = newClawd(48, 92);
+    c.faceBase = 'smile';
+    S.star = newStar(48, 0);
+    S.star.broken = false; S.star.dim = 0; S.star.faceBase = 'happy'; S.star.glowK = .3; S.star.glowR = 10;
+    S.focus = [48, 60];
+    announce('The end. Tap to replay.');
+  },
+  update(S, dt) {
+    const c = S.clawd, s = S.star, t = S.t;
+    if (t > 1 && Math.floor((t - 1) / 2.2) !== Math.floor((S.pt - 1) / 2.2)) {
+      jump(c, 95);
+      if (Math.floor((t - 1) / 2.2) % 2) c.onLand = () => hearts(c.x, c.y - 16, 2);
+    }
+    const a = t * 1.9;
+    s.x = 48 + Math.cos(a) * 20; s.y = 88 + Math.sin(a) * 5; s.lift = 12; s.front = Math.sin(a) > 0;
+    if (rnd() < .5) emit({ type: 'glow', x: s.x + rr(-2, 2), y: s.y - s.lift - 5 + rr(-2, 2), vx: rr(-3, 3), vy: rr(-3, 3), life: .6, c: C.st3, s: .8, z: 0 });
+    updClawd(c, dt); updStar(s, dt);
+  },
+  draw(S) {
+    const c = S.clawd, s = S.star, t = S.t;
+    skyGrad([[0, C.n0], [50, C.n1], [90, C.n2], [120, C.n3]], 0);
+    drawStars(S.stars, t * 2, 0, t, 1, 96);
+    const title = 'THE END', tw = textWidthBig(title), bounce = Math.round(Math.max(0, Math.sin(t * 2.2)) * -1.5);
+    drawTextBig(title, Math.round((W - tw) / 2), 34 + bounce, C.cl3, C.ink);
+    sparkle(18, 32, 2.8 * Math.max(0, Math.sin(t * 2.4)), C.st3);
+    sparkle(78, 46, 2.8 * Math.max(0, Math.sin(t * 2.4 + 2.1)), C.st3);
+    ellipseD(48, 93, 12, 2, C.n2, .8);
+    drawParts(0, 0, 0);
+    if (!s.front) drawStarActor(s, 0, 0, t);
+    drawActor(c, 0, 0);
+    if (s.front) drawStarActor(s, 0, 0, t);
+    drawParts(1, 0, 0); drawParts(2, 0, 0);
+    if (t > 1.5 && (Math.floor(t * 1.6) & 1)) {
+      const h = 'TAP TO REPLAY';
+      drawText(h, Math.round((W - textWidth(h)) / 2), 108, C.txDim, C.ink);
+    }
+  },
+});
+
+// ================================================================= boot
+function fit() {
+  const vw = window.innerWidth, vh = window.innerHeight, dpr = window.devicePixelRatio || 1;
+  const f = Math.min(vw / W, vh / H);
+  const fi = Math.floor(f * dpr) / dpr;           // whole device pixels per game pixel
+  // in portrait the canvas spans the full width (the page above and below continues its
+  // edge colours); otherwise prefer whole-pixel scaling when it costs little space
+  const portrait = vh / vw > H / W;
+  const s = fi > 0 && fi >= f * (portrait ? .99 : .86) ? fi : f;
+  canvas.style.width = W * s + 'px';
+  canvas.style.height = H * s + 'px';
+}
+window.addEventListener('resize', fit);
+fit();
+function advance() { if (TR.phase !== 'out') goTo(SI + 1); }
+window.addEventListener('pointerdown', e => { if (e.button > 0) return; advance(); });
+window.addEventListener('keydown', e => {
+  if (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); advance(); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); if (TR.phase !== 'out') goTo(Math.max(0, SI - 1)); }
+});
+let last = 0, acc = 0;
+const STEP = 1 / 60;
+function frame(ts) {
+  requestAnimationFrame(frame);
+  if (!last) last = ts;
+  let dt = (ts - last) / 1000;
+  last = ts;
+  if (dt > .1) dt = .1;
+  if (Math.abs(dt - STEP) < .002) dt = STEP;
+  acc += dt;
+  let n = 0;
+  while (acc >= STEP - 1e-6 && n < 6) { update(STEP); acc -= STEP; n++; }
+  if (n) render();
+}
+startScene(0);
+TR.phase = 'in'; TR.kind = 'fade'; TR.dur = 1; TR.t = 0;
+render();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

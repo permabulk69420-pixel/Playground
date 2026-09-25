@@ -23,6 +23,10 @@ npm install
 npm run dev
 ```
 
+## Clawd and the Little Star
+
+`public/clawd-story.html` is a self-contained pixel-art animated story starring Clawd, drawn on a 96×120 canvas. Open the file directly in a browser, or visit `/clawd-story.html` on the dev server or the Pages site. Tap, click, Space or → skips to the next scene, and ← goes back.
+
 ## Magic blast
 
 1. In VR, hold **A on the right controller** with your palms facing each other, roughly 20–60 cm apart.
