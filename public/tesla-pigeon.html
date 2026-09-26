@@ -1,0 +1,2218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#07060a">
+<title>Tesla and the White Pigeon</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #07060a; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden; cursor: pointer;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none; user-select: none;
+  }
+  .backdrop { position: fixed; left: 0; right: 0; height: 50%; z-index: 0; transition: background-color .6s ease; background: #07060a; }
+  #backTop { top: 0; }
+  #backBottom { bottom: 0; }
+  canvas {
+    position: relative; z-index: 1;
+    display: block;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
+  }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div id="backTop" class="backdrop"></div>
+<div id="backBottom" class="backdrop"></div>
+<canvas id="screen" width="96" height="120" role="img" aria-label="Tesla and the White Pigeon: a pixel-art animated story. Tap or press space to skip to the next scene."></canvas>
+<div id="captions" class="sr" aria-live="polite"></div>
+<script>
+"use strict";
+/* =====================================================================
+   TESLA AND THE WHITE PIGEON
+   A small pixel-art story, based on Nikola Tesla's own account of the
+   white pigeon he loved in New York. Everything is drawn into a 96x120
+   software framebuffer and scaled up with image-rendering: pixelated.
+   ===================================================================== */
+
+// ---------------------------------------------------------------- screen
+const W = 96, H = 120;
+const canvas = document.getElementById('screen');
+const ctx = canvas.getContext('2d');
+const IMG = ctx.createImageData(W, H);
+const FB = new Uint32Array(IMG.data.buffer);   // ABGR on little-endian
+
+// ---------------------------------------------------------------- palette
+const PAL = {
+  ink: '#0e0b14', black: '#050409', white: '#ffffff',
+  // night sky
+  nt0: '#070914', nt1: '#0c1022', nt2: '#141a36', nt3: '#1d2549', nt4: '#28315c', nt5: '#363f70', nt6: '#4a5283', nt7: '#646b98',
+  // dusk and dawn
+  dk0: '#2e2650', dk1: '#523668', dk2: '#7e4776', dk3: '#b35c7c', dk4: '#e07c7c', dk5: '#f5a57c', dk6: '#fccf96', dk7: '#fff0c4',
+  // buildings at night
+  bd0: '#0a0c18', bd1: '#11152a', bd2: '#191f38', bd3: '#232a48',
+  // brick and stone
+  br0: '#1f141c', br1: '#2f1d27', br2: '#452833', br3: '#5e3642',
+  sn0: '#23242f', sn1: '#32343f', sn2: '#464955', sn3: '#5e616e', sn4: '#7c7f8b', sn5: '#a2a4ae', sn6: '#c9cad0',
+  // warm lamplight
+  wl0: '#5a3a22', wl1: '#a8672e', wl2: '#e0a04a', wl3: '#f8cf78',
+  // Tesla
+  tc0: '#0d0b12', tc1: '#1a1722', tc2: '#2a2634', tc3: '#433d52', tc4: '#5e5770',
+  shirt: '#e6e2d8', tie: '#4a2a3a',
+  sk1: '#b07860', sk2: '#d9a282',
+  hr0: '#15101a', hr1: '#2c2230', gy0: '#77737f', gy1: '#a9a5b0',
+  // city pigeons (rock doves)
+  pg0: '#2c3044', pg1: '#4a5068', pg2: '#6b7290', pg3: '#8f96b0', pgG: '#4f8f7c', pgP: '#7c5c9a', pgF: '#d6727f', pgE: '#e8923a',
+  // the white pigeon: pure white with light gray wingtips
+  wp1: '#bdbacd', wp2: '#dedbe8', wp3: '#f7f6fb', wpF: '#e58a96', wpB: '#e9c9c2',
+  // street
+  as0: '#0d0e18', pv0: '#1b1b28', pv1: '#262739', pv2: '#3a3c53',
+  // wood, room and linen
+  wd0: '#1c120f', wd1: '#2e1d17', wd2: '#472c20', wd3: '#6a432c', wd4: '#8f5d3a',
+  rm1: '#1f1926', rm2: '#2b2333',
+  ln0: '#3c3a4c', ln1: '#5e5c72', ln2: '#8a889e', ln3: '#b8b6c8',
+  // laboratory and lightning
+  lb0: '#0a0810', lb1: '#16111e', lb2: '#241b2e', cp0: '#4a2a1c', cp1: '#7a4a2a', cp2: '#b0703c', cp3: '#e0a060',
+  lt1: '#a89cff', lt2: '#dcd6ff',
+  // weather, props, text
+  snow: '#e6ebff', rain: '#7d93c8', seed: '#d9b27a', paper: '#e8dfc6', lamp: '#ffd98a', moon: '#fff4d8',
+  cream: '#efe3c4', creamD: '#b8a988', txDim: '#8a8298', du1: '#6f6a80',
+  lgr1: '#2b5a45', lgr2: '#4f8f68', mo1: '#f1dfb0', mo2: '#d6bf8c',
+};
+const C = {};
+for (const k in PAL) C[k] = hex(PAL[k]);
+
+function hex(h) {
+  const n = parseInt(h.slice(1), 16);
+  return (0xff000000 | (n & 255) << 16 | (n & 0xff00) | (n >> 16 & 255)) >>> 0;
+}
+const cR = c => c & 255, cG = c => c >>> 8 & 255, cB = c => c >>> 16 & 255;
+function rgb(r, g, b) {
+  r = r < 0 ? 0 : r > 255 ? 255 : r; g = g < 0 ? 0 : g > 255 ? 255 : g; b = b < 0 ? 0 : b > 255 ? 255 : b;
+  return (0xff000000 | (b & 255) << 16 | (g & 255) << 8 | (r & 255)) >>> 0;
+}
+function mix(a, b, t) {
+  return rgb(cR(a) + (cR(b) - cR(a)) * t, cG(a) + (cG(b) - cG(a)) * t, cB(a) + (cB(b) - cB(a)) * t);
+}
+
+// ---------------------------------------------------------------- math
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const prog = (t, a, b) => clamp((t - a) / (b - a), 0, 1);
+const TAU = Math.PI * 2;
+const E = {
+  inOut: t => t < .5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2,
+  out: t => 1 - (1 - t) ** 3,
+};
+function mulberry(seed) {
+  return function () {
+    seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+let rnd = mulberry(7);
+const rr = (a, b) => a + (b - a) * rnd();
+const pick = arr => arr[Math.floor(rnd() * arr.length)];
+
+// 4x4 ordered dither thresholds
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => (v + .5) / 16);
+const bay = (x, y) => BAYER[(y & 3) << 2 | (x & 3)];
+
+// ---------------------------------------------------------------- drawing primitives
+// Everything draws into the current target (the screen, or an offscreen layer).
+let TB = FB, TW = W, TH = H;
+function target(L) { if (L) { TB = L.buf; TW = L.w; TH = L.h; } else { TB = FB; TW = W; TH = H; } }
+
+function pset(x, y, c) {
+  x = Math.floor(x); y = Math.floor(y);
+  if (x >= 0 && y >= 0 && x < TW && y < TH) TB[y * TW + x] = c;
+}
+function rect(x, y, w, h, c) {
+  x = Math.round(x); y = Math.round(y);
+  const x0 = Math.max(0, x), x1 = Math.min(TW, x + w), y0 = Math.max(0, y), y1 = Math.min(TH, y + h);
+  if (x1 <= x0) return;
+  for (let j = y0; j < y1; j++) TB.fill(c, j * TW + x0, j * TW + x1);
+}
+// dithered rectangle: only pixels whose threshold is below `a` are painted
+function drect(x, y, w, h, c, a) {
+  x = Math.round(x); y = Math.round(y);
+  const x0 = Math.max(0, x), x1 = Math.min(TW, x + w), y0 = Math.max(0, y), y1 = Math.min(TH, y + h);
+  for (let j = y0; j < y1; j++) for (let i = x0; i < x1; i++) if (bay(i, j) < a) TB[j * TW + i] = c;
+}
+function blendAt(i, c, a) {
+  const d = TB[i];
+  TB[i] = rgb(cR(d) + (cR(c) - cR(d)) * a, cG(d) + (cG(c) - cG(d)) * a, cB(d) + (cB(c) - cB(d)) * a);
+}
+function brect(x, y, w, h, c, a) {
+  x = Math.round(x); y = Math.round(y);
+  const x0 = Math.max(0, x), x1 = Math.min(TW, x + w), y0 = Math.max(0, y), y1 = Math.min(TH, y + h);
+  for (let j = y0; j < y1; j++) for (let i = x0; i < x1; i++) blendAt(j * TW + i, c, a);
+}
+function addAt(i, r, g, b) {
+  const d = TB[i];
+  TB[i] = rgb(cR(d) + r, cG(d) + g, cB(d) + b);
+}
+function addPx(x, y, c, k = 1) {
+  x = Math.floor(x); y = Math.floor(y);
+  if (x >= 0 && y >= 0 && x < TW && y < TH) addAt(y * TW + x, cR(c) * k, cG(c) * k, cB(c) * k);
+}
+// soft light, quantised into a few dithered bands so it still reads as pixel art
+function glow(cx, cy, rad, c, k = 1, steps = 4, dither = true) {
+  if (rad <= 0 || k <= 0) return;
+  const r = cR(c), g = cG(c), b = cB(c), r2 = rad * rad;
+  const x0 = Math.max(0, Math.floor(cx - rad)), x1 = Math.min(TW - 1, Math.ceil(cx + rad));
+  const y0 = Math.max(0, Math.floor(cy - rad)), y1 = Math.min(TH - 1, Math.ceil(cy + rad));
+  for (let y = y0; y <= y1; y++) {
+    const dy = y + .5 - cy;
+    for (let x = x0; x <= x1; x++) {
+      const dx = x + .5 - cx, d2 = (dx * dx + dy * dy) / r2;
+      if (d2 >= 1) continue;
+      const f = (1 - d2) * (1 - d2) * k;
+      const q = Math.floor(f * steps + (dither ? bay(x, y) : .5)) / steps;
+      if (q > 0) addAt(y * TW + x, r * q, g * q, b * q);
+    }
+  }
+}
+function line(x0, y0, x1, y1, c) {
+  x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+  const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let e = dx + dy;
+  for (let n = 0; n < 600; n++) {
+    pset(x0, y0, c);
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * e;
+    if (e2 >= dy) { e += dy; x0 += sx; }
+    if (e2 <= dx) { e += dx; y0 += sy; }
+  }
+}
+function lineAdd(x0, y0, x1, y1, c, k) {
+  const n = Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1));
+  for (let i = 0; i <= n; i++) addPx(Math.round(lerp(x0, x1, i / n)), Math.round(lerp(y0, y1, i / n)), c, k);
+}
+function disc(cx, cy, r, c) {
+  for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++) {
+    const dy = y + .5 - cy, hw = r * r - dy * dy;
+    if (hw < 0) continue;
+    const s = Math.sqrt(hw);
+    const x0 = Math.round(cx - s), x1 = Math.round(cx + s);
+    if (y >= 0 && y < TH) rect(x0, y, x1 - x0, 1, c);
+  }
+}
+// cheap deterministic hash for textures
+function hash2(x, y) {
+  let h = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) | 0;
+  h = Math.imul(h ^ h >>> 13, 1274126177);
+  return ((h ^ h >>> 16) >>> 0) / 4294967296;
+}
+
+// ---------------------------------------------------------------- sprites
+function spr(rows, key) {
+  const h = rows.length, w = rows[0].length;
+  const px = new Uint32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    if (rows[y].length !== w) throw new Error('ragged sprite row ' + y + ': ' + rows[y]);
+    for (let x = 0; x < w; x++) {
+      const ch = rows[y][x];
+      if (ch === '.') continue;
+      const name = key[ch];
+      if (!name) throw new Error('no colour for "' + ch + '"');
+      px[y * w + x] = C[name];
+    }
+  }
+  return { w, h, px, rows };
+}
+// blit with optional mirror, solid colour (silhouette / flash) and dithered alpha
+function blit(s, x, y, flip = false, solid = 0, alpha = 1) {
+  x = Math.round(x); y = Math.round(y);
+  for (let j = 0; j < s.h; j++) {
+    const yy = y + j;
+    if (yy < 0 || yy >= TH) continue;
+    for (let i = 0; i < s.w; i++) {
+      const xx = x + i;
+      if (xx < 0 || xx >= TW) continue;
+      const c = s.px[j * s.w + (flip ? s.w - 1 - i : i)];
+      if (!c) continue;
+      if (alpha < 1 && bay(xx, yy) >= alpha) continue;
+      TB[yy * TW + xx] = solid || c;
+    }
+  }
+}
+
+// ---------------------------------------------------------------- keys
+// Sprites are hand-coded as arrays of strings, one character per pixel.
+// '.' is transparent; every other character is looked up in a small key.
+const KEY = {
+  tesla: { o: 'ink', H: 'tc1', h: 'tc3', r: 'hr0', R: 'hr1', s: 'sk2', S: 'sk1', e: 'ink', m: 'hr0',
+    w: 'shirt', t: 'tie', c: 'tc1', C: 'tc0', k: 'tc3', K: 'tc2', p: 'tc1', P: 'tc0', f: 'tc0', F: 'tc4' },
+  rock: { o: 'ink', H: 'pg2', N: 'pgG', n: 'pgP', E: 'pgE', b: 'pg0', B: 'pg3', W: 'pg3', w: 'pg2', x: 'pg0', T: 'pg1', X: 'pg0', F: 'pgF', g: 'white' },
+  white: { o: 'ink', H: 'wp3', N: 'wp3', n: 'wp2', E: 'ink', b: 'wpB', B: 'wp3', W: 'wp3', w: 'wp2', x: 'wp1', T: 'wp2', X: 'wp1', F: 'wpF', g: 'white' },
+  prop: { o: 'ink', a: 'sn6', b: 'sn5', c: 'sn4', d: 'sn3', e: 'sn2', u: 'wd1', v: 'wd2', x: 'wd3', z: 'wd4',
+    W: 'wp3', Y: 'wp2', Q: 'wp1', q: 'ln2', t: 'ln3', k: 'tc1', K: 'tc2', j: 'tc3', n: 'nt5', m: 'ink', h: 'lamp',
+    J: 'nt4', E: 'sk2', F: 'sk1', S: 'tc0', g: 'wl2', G: 'wl3', L: 'lgr1', l: 'lgr2' },
+  logo: { o: 'ink', y: 'dk7', a: 'cream', b: 'wl3', c: 'wl2', d: 'wl1' },
+  moon: { a: 'moon', b: 'mo1', c: 'mo2' },
+};
+// Tesla grows old in the last scenes: his hair and moustache turn grey
+KEY.old = Object.assign({}, KEY.tesla, { r: 'gy0', R: 'gy1', m: 'gy0' });
+
+// ---------------------------------------------------------------- Nikola Tesla (side view, facing right)
+const TESLA_DEF = {
+  stand: [
+    '.....oooo.......',
+    '....oHHhHo......',
+    '....oHHHHo......',
+    '....oHHHHo......',
+    '..ooHHHHHHoo....',
+    '....orrrrsso....',
+    '....orrrseso....',
+    '....orrssssso...',
+    '....orssmmmo....',
+    '.....osssso.....',
+    '......oSSo......',
+    '.....owwwwo.....',
+    '....ockKKwo.....',
+    '...ocKKKwto.....',
+    '...occKKKwo.....',
+    '...occKKKco.....',
+    '...occKKKco.....',
+    '...occKKKco.....',
+    '...occcKKco.....',
+    '...occcKsSo.....',
+    '...occccSSo.....',
+    '...occcccco.....',
+    '...oCccccCo.....',
+    '....oCCCCo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....offFffo.....',
+    '....ooooooo.....',
+  ],
+  walkA: [
+    '.....oooo.......',
+    '....oHHhHo......',
+    '....oHHHHo......',
+    '....oHHHHo......',
+    '..ooHHHHHHoo....',
+    '....orrrrsso....',
+    '....orrrseso....',
+    '....orrssssso...',
+    '....orssmmmo....',
+    '.....osssso.....',
+    '......oSSo......',
+    '.....owwwwo.....',
+    '....ockKKwo.....',
+    '...ocKKKwto.....',
+    '...occKKKwo.....',
+    '...occcKKKo.....',
+    '...occcKKKo.....',
+    '...occccKKKo....',
+    '...occccKKKo....',
+    '...occccoKsSo...',
+    '...occccoSSo....',
+    '...occcccooo....',
+    '...oCccccCo.....',
+    '....oCCCCo......',
+    '....oppPPo......',
+    '...opPooPPo.....',
+    '...opPo.oPPo....',
+    '..opPo..oPPo....',
+    '..opPo...oPPo...',
+    '..oPo....oPPo...',
+    '.oPPo.....oPo...',
+    '.offo....offFo..',
+    '.oooo....ooooo..',
+  ],
+  walkB: [
+    '.....oooo.......',
+    '....oHHhHo......',
+    '....oHHHHo......',
+    '....oHHHHo......',
+    '..ooHHHHHHoo....',
+    '....orrrrsso....',
+    '....orrrseso....',
+    '....orrssssso...',
+    '....orssmmmo....',
+    '.....osssso.....',
+    '......oSSo......',
+    '.....owwwwo.....',
+    '....ockKKwo.....',
+    '...ocKKKwto.....',
+    '...occKKKwo.....',
+    '...occKKKco.....',
+    '...occKKKco.....',
+    '...occKKKco.....',
+    '...occcKKco.....',
+    '...occcKsSo.....',
+    '...occccSSo.....',
+    '...occcccco.....',
+    '...oCccccCo.....',
+    '....oCCCCo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....opPPPo......',
+    '....opoPPo......',
+    '....opooPo......',
+    '...oPo.oPPo.....',
+    '...oPo.oPPo.....',
+    '..offo.offFo....',
+    '..oooo.ooooo....',
+  ],
+  walkC: [
+    '.....oooo.......',
+    '....oHHhHo......',
+    '....oHHHHo......',
+    '....oHHHHo......',
+    '..ooHHHHHHoo....',
+    '....orrrrsso....',
+    '....orrrseso....',
+    '....orrssssso...',
+    '....orssmmmo....',
+    '.....osssso.....',
+    '......oSSo......',
+    '.....owwwwo.....',
+    '....ockKKwo.....',
+    '...oKKKcwto.....',
+    '...oKKKccwo.....',
+    '..oKKKcccco.....',
+    '..oKKKcccco.....',
+    '..oKKccccco.....',
+    '.oKKcccccco.....',
+    '.osScccccco.....',
+    '.oSSocccccco....',
+    '..oo.occcco.....',
+    '...oCccccCo.....',
+    '....oCCCCo......',
+    '....oPPppo......',
+    '...oPPoopPo.....',
+    '...oPPo.opPo....',
+    '..oPPo..opPo....',
+    '..oPPo...opPo...',
+    '..oPo....opPo...',
+    '.oPPo.....opo...',
+    '.offo....offFo..',
+    '.oooo....ooooo..',
+  ],
+  scatter: [
+    '.....oooo.......',
+    '....oHHhHo......',
+    '....oHHHHo......',
+    '....oHHHHo......',
+    '..ooHHHHHHoo....',
+    '....orrrrsso....',
+    '....orrrseso....',
+    '....orrssssso...',
+    '....orssmmmo....',
+    '.....osssso.....',
+    '......oSSo......',
+    '.....owwwwo.....',
+    '....ockKKwo.....',
+    '...ocKKKwto.....',
+    '...occKKKKKoo...',
+    '...occcoKKKKsSo.',
+    '...occco.ooosSo.',
+    '...occco....oo..',
+    '...occco........',
+    '...occco........',
+    '...occcco.......',
+    '...occccco......',
+    '...oCccccCo.....',
+    '....oCCCCo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....offFffo.....',
+    '....ooooooo.....',
+  ],
+  hold: [
+    '.....oooo.......',
+    '....oHHhHo......',
+    '....oHHHHo......',
+    '....oHHHHo......',
+    '..ooHHHHHHoo....',
+    '....orrrrsso....',
+    '....orrrseso....',
+    '....orrssssso...',
+    '....orssmmmo....',
+    '.....osssso.....',
+    '......oSSo......',
+    '.....owwwwo.....',
+    '....ockKKwo.....',
+    '...ocKKKwto.....',
+    '...occKKKwo.....',
+    '...occcKKKo.....',
+    '...occcoKKKo....',
+    '...occco.oKKoo..',
+    '...occco..oKsSo.',
+    '...occco...oSSo.',
+    '...occcco...oo..',
+    '...occccco......',
+    '...oCccccCo.....',
+    '....oCCCCo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....offFffo.....',
+    '....ooooooo.....',
+  ],
+  bare: [
+    '................',
+    '................',
+    '.....ooooo......',
+    '....orrRRro.....',
+    '....orrrrrso....',
+    '....orrrrsso....',
+    '....orrrseso....',
+    '....orrssssso...',
+    '....orssmmmo....',
+    '.....osssso.....',
+    '......oSSo......',
+    '.....owwwwo.....',
+    '....ockKKwo.....',
+    '...ocKKKwto.....',
+    '...occKKKwo.....',
+    '...occKKKco.....',
+    '...occKKKco.....',
+    '...occKKKco.....',
+    '...occcKKco.....',
+    '...occcKsSo.....',
+    '...occccSSo.....',
+    '...occcccco.....',
+    '...oCccccCo.....',
+    '....oCCCCo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....offFffo.....',
+    '....ooooooo.....',
+  ],
+  bareHold: [
+    '................',
+    '................',
+    '.....ooooo......',
+    '....orrRRro.....',
+    '....orrrrrso....',
+    '....orrrrsso....',
+    '....orrrseso....',
+    '....orrssssso...',
+    '....orssmmmo....',
+    '.....osssso.....',
+    '......oSSo......',
+    '.....owwwwo.....',
+    '....ockKKwo.....',
+    '...ocKKKwto.....',
+    '...occKKKwo.....',
+    '...occcKKKo.....',
+    '...occcoKKKo....',
+    '...occco.oKKoo..',
+    '...occco..oKsSo.',
+    '...occco...oSSo.',
+    '...occcco...oo..',
+    '...occccco......',
+    '...oCccccCo.....',
+    '....oCCCCo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....oppPPo......',
+    '....offFffo.....',
+    '....ooooooo.....',
+  ],
+  sit: [
+    '................',
+    '................',
+    '.....ooooo......',
+    '....orrRRro.....',
+    '....orrrrrso....',
+    '....orrrrsso....',
+    '....orrrseso....',
+    '....orrssssso...',
+    '....orssmmmo....',
+    '.....osssso.....',
+    '......oSSo......',
+    '.....owwwwo.....',
+    '....ockKKwo.....',
+    '...ocKKKwto.....',
+    '...occKKKwo.....',
+    '...occcKKKo.....',
+    '...occcoKKKo....',
+    '...occco.oKKKo..',
+    '...occco..oKsSo.',
+    '...occcco..ooo..',
+    '...occcccooooo..',
+    '...occccccppppo.',
+    '...oCCCpppppPPo.',
+    '....ooooooooPPo.',
+    '...........oPPo.',
+    '...........oPPo.',
+    '...........oPPo.',
+    '...........oPPo.',
+    '...........offFo',
+    '...........ooooo',
+  ],
+  sit2: [
+    '................',
+    '................',
+    '.....ooooo......',
+    '....orrRRro.....',
+    '....orrrrrso....',
+    '....orrrrsso....',
+    '....orrrseso....',
+    '....orrssssso...',
+    '....orssmmmo....',
+    '.....osssso.....',
+    '......oSSo......',
+    '.....owwwwo.....',
+    '....ockKKwo.....',
+    '...ocKKKwto.....',
+    '...occKKKwo.....',
+    '...occcKKKo.....',
+    '...occcoKKKo....',
+    '...occco.oKKKo..',
+    '...occco..oKSso.',
+    '...occcco..ooo..',
+    '...occcccooooo..',
+    '...occccccppppo.',
+    '...oCCCpppppPPo.',
+    '....ooooooooPPo.',
+    '...........oPPo.',
+    '...........oPPo.',
+    '...........oPPo.',
+    '...........oPPo.',
+    '...........offFo',
+    '...........ooooo',
+  ],
+  bowed: [
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+    '......ooooo.....',
+    '.....orrRRro....',
+    '.....orrrrrRo...',
+    '.....orrrrrso...',
+    '......orrrsso...',
+    '......orrrSso...',
+    '.......orSSsso..',
+    '.......oSmmmo...',
+    '......owwwwo....',
+    '....ockKKwo.....',
+    '...ocKKKKwo.....',
+    '...occKKKKKo....',
+    '...occcKKKKKo...',
+    '...occcoKKKKKo..',
+    '...occco.oKKsSo.',
+    '...occcco.oSSoo.',
+    '...occcccooooo..',
+    '...occccccppppo.',
+    '...oCCCpppppPPo.',
+    '....ooooooooPPo.',
+    '...........oPPo.',
+    '...........oPPo.',
+    '...........oPPo.',
+    '...........oPPo.',
+    '...........offFo',
+    '...........ooooo',
+  ],
+};
+// walking without his hat (indoors): the hat rows swapped for hair
+for (const n of ['walkA', 'walkB', 'walkC'])
+  TESLA_DEF['bare' + n[0].toUpperCase() + n.slice(1)] = [...TESLA_DEF.bare.slice(0, 5), ...TESLA_DEF[n].slice(5)];
+const TESLA = {}, TESLA_OLD = {};
+for (const k in TESLA_DEF) { TESLA[k] = spr(TESLA_DEF[k], KEY.tesla); TESLA_OLD[k] = spr(TESLA_DEF[k], KEY.old); }
+// his head resting on a pillow (the bare head turned a quarter turn)
+const PILLOW_HEAD = spr([
+  '.....o...',
+  '..oooso..',
+  '.ossssmo.',
+  'orrsesmso',
+  'oRrrssmsS',
+  'oRrrrsssS',
+  'orrrrrsso',
+  'orrrrrro.',
+  '.oooooo..',
+  '.........',
+], KEY.tesla);
+
+// ---------------------------------------------------------------- pigeons (facing right)
+const PIGEON_DEF = {
+  stand: [
+    '.......oo..',
+    '......oHEo.',
+    '......oHHbo',
+    '...oooNnHo.',
+    '.ooWWWwnBo.',
+    'oXTxWxwBBo.',
+    '.oTTWWBBBo.',
+    '..oooooooo.',
+    '.....F.F...'],
+  peck: [
+    '...........',
+    '...........',
+    '..oooo.....',
+    '.oTWWwoo...',
+    'oXTxWxwNoo.',
+    '.oTTWWBnHHo',
+    '..ooooooHEo',
+    '.....F.F.bo',
+    '...........'],
+  up: [
+    '..oo.......',
+    '..owo......',
+    '..owwo.....',
+    '.ooWwwoooo.',
+    'oXTWWWBHEo.',
+    '.ooWWBBHbo.',
+    '...ooooo...',
+    '...........'],
+  down: [
+    '...........',
+    '........oo.',
+    '..oooooHHEo',
+    'oXTWWWBBHbo',
+    '.ooWwwBoo..',
+    '...owwo....',
+    '...owo.....',
+    '....o......'],
+};
+const PIGEON = {}, WHITE_PIGEON = {};
+for (const k in PIGEON_DEF) {
+  PIGEON[k] = spr(PIGEON_DEF[k], KEY.rock);
+  WHITE_PIGEON[k] = spr(PIGEON_DEF[k], KEY.white);
+}
+// the white pigeon, close up: pure white with light gray tips on her wings
+// (drawn at 28x20, enlarged with Scale2x and then touched up by hand)
+const WHITE_XL_DEF = [
+  '........................................oooo........',
+  '......................................ooHHHHoo......',
+  '....................................ooHHHHHHHHo.....',
+  '..................................ooHHHHHHHHHHo.....',
+  '.................................oHHHHHHHHHHHHHo....',
+  '.................................oHHHHHHHHEgHHHo....',
+  '................................oHHHHHHHHEEEgHHoo...',
+  '................................oHHHHHHHHEEEEHHbbbbo',
+  '................................oHHHHHHHHHEEHHHbbbo.',
+  '..............................ooNHHHHHHHHHHHHHHooo..',
+  '.............................oNNNHHHHHHHHHHHHHo.....',
+  '............................ooNNNnHHHHHHHHHHHHo.....',
+  '...........................oNNNNnnnnHHHHHHHHoo......',
+  '..........................ooNNNNnnnnnBBBBBBo........',
+  '.........................oNNNNnnnnnnBBBBBBBo........',
+  '.........................oNNnnnnnnBBBBBBBBBo........',
+  '..................oooooooNNnnnnnBBBBBBBBBBBo........',
+  '................ooWWWWWWWWWnnnnnBBBBBBBBBBBo........',
+  '............oooowWwWWWwWwWWWnnBBBBBBBBBBBBBo........',
+  '...........oWWwWWWWWwWWWWWwWWBBBBBBBBBBBBBBo........',
+  '........oooWWWWWWWWWWWWWWWWWWWBBBBBBBBBBBBBo........',
+  '......ooxwwwWwWwWWWwWwWWWwWwWWBBBBBBBBBBBBBo........',
+  '.....oxxxwwwwwWWWwxWWWWwWWWWWwWBBBBBBBBBBBo.........',
+  '.....oxxxwwwwwwwWWWWWWWWWWWWWWWBBBBBBBBBBBo.........',
+  '....oxxxxxwwwwwwwwWwWWWwWwWWWwBBBBBBBBBBBo..........',
+  '..ooXxxxxxwwwwwwwwWWWwxWWWWwWWBBBBBBBBBBBo..........',
+  '.oXXXxxxxxxxwwwwwwwwWWWWWWWWBBBBBBBBBBBBo...........',
+  '.oXXXxxxxxxxwwwwwwwwWwWwWWWwBBBBBBBBBBBBo...........',
+  'oXXXXXxxxxxxxxwwwwwwwWWWWwBBBBBBBBBBBBoo............',
+  'oXXXXXxxxxxxxxwwwwwwwWWWWWBBBBBBBBBBBBo.............',
+  '.oXXXXXXxxxxxxxxwwwwwWWWBBBBBBBBBBBBoo..............',
+  '..ooXXXXxxxxxxxxxxwwwWWWBBBBBBBBBBoo................',
+  '....ooXXXxxxxxxxxxxwwWWBBBBBBBBBoo..................',
+  '......ooooxxxxxxxxxooooooooooooo....................',
+  '..........ooxxxxxxxo.......oo.......................',
+  '............ooooo.........oFFo....oFFo..............',
+  '.........................oFFFFo...oFFFo.............',
+  '.........................oFFFFo...oFFFFFFo..........',
+  '........................oFFFFFFo..oFFFFFFo..........',
+];
+const WHITE_XL = spr(WHITE_XL_DEF, KEY.white);
+const WHITE_XL_BLINK = spr(WHITE_XL_DEF.map((r, i) => i >= 5 && i < 8 ? r.replace(/[Eg]/g, 'H') : r), KEY.white);
+const WHITE_XL_EYE = [43, 7];          // her eye, where the light comes from
+
+// ---------------------------------------------------------------- props
+const PROP = {
+  lion: spr([
+    '..................oooooo....',
+    '................oobcbcbbo...',
+    '...............obcbccbcbo...',
+    '..............obccbaaabcbo..',
+    '..............obcbaaeaaabo..',
+    '..............obcbaaaaaaabo.',
+    '..............obccbaaaaadbo.',
+    '..............obcbbaaaaabo..',
+    '.......ooooooobbccbbbbbbo...',
+    '....ooobbbbbbbbbbbcbcbbbo...',
+    '..oobaaaaaaaaaaabbbbbbbbo...',
+    '.obaaaaaaaaaaaaaabbbbbbbboo.',
+    'obbbbbbbbbbbbbbbbbbbbaaaaabo',
+    'occccccccccccccccccccccccdco',
+    'oooooooooooooooooooooooooooo'], KEY.prop),
+  lamp: spr([
+    '..ooooooo..',
+    '.oLLlllLLo.',
+    'oLLLLLLLLLo',
+    'ooooooooooo',
+    '....ogo....',
+    '....ogo....',
+    '...ogggo...',
+    '..oggGggo..',
+    '..ooooooo..'], KEY.prop),
+  feather: spr([
+    '...oo.',
+    '..oWWo',
+    '.oWWYo',
+    '.oWYWo',
+    'oWYWo.',
+    'oYWWo.',
+    'oQYo..',
+    '.oQo..',
+    '..oo..',
+    '..o...'], KEY.prop),
+  basket: spr([
+    '..ooooooooooo..',
+    '.oqtqtqtqtqtqo.',
+    'oxzxzxzxzxzxzxo',
+    'ovxvxvxvxvxvxvo',
+    '.ouvuvuvuvuvuo.',
+    '..ooooooooooo..'], KEY.prop),
+  boy: spr([
+    '...oooo...',
+    '..oJJJJo..',
+    '..oJJJJoo.',
+    '..ommmmmmo',
+    '..oEEEEo..',
+    '..oEEmEo..',
+    '..oFEEEo..',
+    '...oFFo...',
+    '..oJJJJo..',
+    '.oJJgJJJo.',
+    '.oJJJJJJo.',
+    '.oJJgJJJo.',
+    '.oJEJJJJo.',
+    '..oJJJJo..',
+    '..oSSSSo..',
+    '..oSSoSo..',
+    '..oSSoSo..',
+    '..oSSoSo..',
+    '..oSSoSo..',
+    '.oSSoSSo..',
+    '.oooooooo.'], KEY.prop),
+  car: spr([
+    '.........oooooooooo............',
+    '........okkkkkkkkkko...........',
+    '.......okKnnnKnnnnKko..........',
+    '......okkKnnnKnnnnKkko.........',
+    '..oooookkkkkkkkkkkkkkoooooo....',
+    '.okkkkkkkkkkkkkkkkkkkkkkkkkko..',
+    'ohkkkkkkkkkkkkkkkkkkkkkkkkkkko.',
+    'okkkoooookkkkkkkkkkkkkooooookko',
+    'okkoKjjKokkkkkkkkkkkkoKjjKokko.',
+    '.ooojmmjoooooooooooooojmmjooo..',
+    '....oKKo..............oKKo.....',
+    '.....oo................oo......'], KEY.prop),
+};
+
+// his hand, close up, with the forefinger held out as a perch
+const HAND = spr([
+  '.........................................................oo................................',
+  '.......................................................oossoo..............................',
+  '......................................................ossssssoo............................',
+  '.....................................................oosssssssso...........................',
+  '............................................ooooooooossssssssssso..........................',
+  '.........................................owwwwwwwwsssssssssssssso..........................',
+  'ooooooooooooooooooooooooooooooooooooooo..owwwwwwwwsssssssssssssssoooooooooooooooooooooo....',
+  'kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkko.owwwwwwwwsssssssssssssssssssssssssssssssssssssoo..',
+  'kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkoowwwwwwwwssssssssssssssssssssssssssssssssssssssso.',
+  'KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKoowwwwwwwwssSSsssssssssssssssssssssssssssssssssssso',
+  'KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKoowwwwwwwwsSSSsssssssssssssssssssssssssssssssssssso',
+  'KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKoowwwwwwwwSSSSssssssssssssssssoooooooooooooooooooo.',
+  'KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKoowwwwwwwwSSSSSsssssssssssssssoooooooo.............',
+  'kKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKoowwwwwwwwSSSSSssssssssssssssssssssssso............',
+  'kkkKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKoowwwwwwwwSSSSSSSssssssssssssssssssssso............',
+  'kkkKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKoowwwwwwwwSSSSSSSssssssssssssssssssooo.............',
+  'kkkkkKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKoowwwwwwwwSSSSSSSSSssssssssssssssoo................',
+  'kkkkkKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKoowwwwwwwwoSSSSSSSSSSSSSSSSSSsssso.................',
+  'kkkkkkkKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKoowwwwwwwwoooSSSSSSSSSSSSSSSSSsoo..................',
+  'CkkkkkkKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKoowwwwwwwwo.oSSSSSSSSSSSSSSSSoo....................',
+  'CCCkkkkkkKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKoowwwwwwwwo..ooSSSSSSSSSSSSSo......................',
+  'CCCkkkkkkKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKoowwwwwwwwo....ooooooooooo.........................',
+  'CCCCCkkkkkkKKKKKKKKKKKKKKKKKKKKKKKKKKKKKoowwwwwwwwo........................................',
+  'CCCCCkkkkkkKKKKKKKKKKKKKKKKKKKKKKKKKKKKKoowwwwwwwwo........................................',
+  'CCCCCCCkkkkkkKKKKKKKKKKKKKKKKKKKKKKKKKKKo.owwwwwwo.........................................',
+  'CCCCCCCkkkkkkKKKKKKKKKKKKKKKKKKKKKKKKKKKo..oooooo..........................................',
+  '.CCCCCCCkkkkkkKKKKKKKKKKKKKKKKKKKKKKKKKKo..................................................',
+], { o: 'ink', s: 'sk2', S: 'sk1', w: 'shirt', k: 'tc2', K: 'tc1', C: 'tc0' });
+
+// ---------------------------------------------------------------- title logo (Art Deco capitals)
+const LOGO = spr([
+  '.oooooo..oooooo...ooooo..oo........oo...',
+  'oyyyyyyooyyyyyyo.oyyyyyooyyo......oyyo..',
+  'oyyyyyyooyyyyyyooyyyyyyooyyo.....oyyyyo.',
+  '.ooaaoo.oaaoooo.oaaoooo.oaao.....oaaaao.',
+  '..oaao..oaaooo..oaaooo..oaao....oaaooaao',
+  '..oaao..oaaaaao.oaaaaao.oaao....oaaooaao',
+  '..obbo..obbbbbo..obbbbboobbo....obboobbo',
+  '..obbo..obbooo....ooobboobbo....obbbbbbo',
+  '..obbo..obbo........obboobbo....obbbbbbo',
+  '..occo..occoooo..ooooccooccoooo.occoocco',
+  '..occo..occccccooccccccooccccccooccoocco',
+  '..oddo..oddddddoodddddo.oddddddooddooddo',
+  '...oo....oooooo..ooooo...oooooo..oo..oo.',
+], KEY.logo);
+
+// ---------------------------------------------------------------- moon
+const MOON = spr([
+  '....aaaaa....',
+  '..aaaaaaaaa..',
+  '.aaaabbaaaaa.',
+  '.aaabccbaaab.',
+  'aaaabccbaaaab',
+  'aaaaabbaaaabb',
+  'aaaaaaaaabbbb',
+  'aabbaaaaabcbb',
+  'abccbaaabccbb',
+  '.abbaaaaabbb.',
+  '.aaaaaaabbbb.',
+  '..abbbbbbbb..',
+  '....bbbbb....'], KEY.moon);
+
+// ---------------------------------------------------------------- 3x5 pixel font
+const FONT_SRC = {
+  A: '.#.|#.#|###|#.#|#.#', B: '##.|#.#|##.|#.#|##.', C: '.##|#..|#..|#..|.##', D: '##.|#.#|#.#|#.#|##.',
+  E: '###|#..|##.|#..|###', F: '###|#..|##.|#..|#..', G: '.##|#..|#.#|#.#|.##', H: '#.#|#.#|###|#.#|#.#',
+  I: '###|.#.|.#.|.#.|###', J: '..#|..#|..#|#.#|.#.', K: '#.#|#.#|##.|#.#|#.#', L: '#..|#..|#..|#..|###',
+  M: '#...#|##.##|#.#.#|#...#|#...#', N: '#..#|##.#|#.##|#..#|#..#', O: '.#.|#.#|#.#|#.#|.#.',
+  P: '##.|#.#|##.|#..|#..', Q: '.#.|#.#|#.#|##.|.##', R: '##.|#.#|##.|#.#|#.#', S: '.##|#..|.#.|..#|##.',
+  T: '###|.#.|.#.|.#.|.#.', U: '#.#|#.#|#.#|#.#|###', V: '#.#|#.#|#.#|#.#|.#.', W: '#...#|#...#|#.#.#|##.##|#...#',
+  X: '#.#|#.#|.#.|#.#|#.#', Y: '#.#|#.#|.#.|.#.|.#.', Z: '###|..#|.#.|#..|###',
+  0: '###|#.#|#.#|#.#|###', 1: '.#.|##.|.#.|.#.|###', 2: '##.|..#|.#.|#..|###', 3: '##.|..#|.#.|..#|##.',
+  4: '#.#|#.#|###|..#|..#', 5: '###|#..|##.|..#|##.', 6: '.#.|#..|##.|#.#|.#.', 7: '###|..#|.#.|.#.|.#.',
+  8: '.#.|#.#|.#.|#.#|.#.', 9: '.#.|#.#|.##|..#|.#.',
+  '.': '.|.|.|.|#', ',': '.|.|.|#|#', '!': '#|#|#|.|#', '?': '##.|..#|.#.|...|.#.', "'": '#|#|.|.|.',
+  '-': '...|...|###|...|...', ':': '.|#|.|#|.', '/': '..#|..#|.#.|#..|#..', '>': '#..|.#.|..#|.#.|#..',
+  '<': '..#|.#.|#..|.#.|..#', '(': '.#|#.|#.|#.|.#', ')': '#.|.#|.#|.#|#.', '=': '...|###|...|###|...',
+  '+': '...|.#.|###|.#.|...', '*': '...|#.#|.#.|#.#|...', '_': '...|...|...|...|###', '#': '#.#|###|#.#|###|#.#',
+  '♥': '.#.#.|#####|#####|.###.|..#..', '✓': '....#|...##|#.##.|###..|.#...', '▶': '#..|##.|###|##.|#..',
+  '♪': '.##|.#.|.#.|##.|##.', '{': '.##|.#.|#..|.#.|.##', '}': '##.|.#.|..#|.#.|##.', ';': '..|.#|..|.#|#.',
+  '[': '##|#.|#.|#.|##', ']': '##|.#|.#|.#|##', '"': '#.#|#.#|...|...|...', '█': '###|###|###|###|###', '…': '.....|.....|.....|.....|#.#.#', '★': '..#..|.###.|#####|.###.|.#.#.',
+  ' ': '..|..|..|..|..',
+};
+const FONT = {};
+for (const ch in FONT_SRC) {
+  const rows = FONT_SRC[ch].split('|');
+  FONT[ch] = { w: rows[0].length, rows };
+}
+function textWidth(s) {
+  let w = 0;
+  for (const ch of s) { const g = FONT[ch] || FONT[' ']; w += g.w + 1; }
+  return Math.max(0, w - 1);
+}
+function drawText(s, x, y, c, shadow = 0, alpha = 1) {
+  x = Math.round(x); y = Math.round(y);
+  let cx = x;
+  for (const ch of s) {
+    const g = FONT[ch] || FONT[' '];
+    for (let j = 0; j < 5; j++) for (let i = 0; i < g.w; i++) {
+      if (g.rows[j][i] !== '#') continue;
+      const X = cx + i, Y = y + j;
+      if (alpha < 1 && bay(X, Y) >= alpha) continue;
+      if (shadow) { pset(X + 1, Y, shadow); pset(X, Y + 1, shadow); pset(X + 1, Y + 1, shadow); }
+      pset(X, Y, c);
+    }
+    cx += g.w + 1;
+  }
+  return cx - x - 1;
+}
+function wrapText(s, maxW) {
+  const lines = [];
+  for (const para of s.split('\n')) {
+    let cur = '';
+    for (const w of para.split(' ')) {
+      const t = cur ? cur + ' ' + w : w;
+      if (textWidth(t) <= maxW || !cur) cur = t; else { lines.push(cur); cur = w; }
+    }
+    if (cur) lines.push(cur);
+  }
+  return lines;
+}
+
+
+// ---------------------------------------------------------------- parallax layers
+function layer(w, h, paint) {
+  const L = { w, h, buf: new Uint32Array(w * h) };
+  target(L); paint(L); target(null);
+  return L;
+}
+function drawLayer(L, ox, oy, wrap = true) {
+  ox = Math.round(ox); oy = Math.round(oy);
+  const y0 = Math.max(0, oy), y1 = Math.min(H, oy + L.h), buf = L.buf, lw = L.w;
+  for (let y = y0; y < y1; y++) {
+    const row = (y - oy) * lw, o = y * W;
+    if (wrap) {
+      let lx = ((-ox) % lw + lw) % lw;
+      for (let x = 0; x < W; x++) {
+        const c = buf[row + lx];
+        if (c) FB[o + x] = c;
+        if (++lx === lw) lx = 0;
+      }
+    } else {
+      const xa = Math.max(0, ox), xb = Math.min(W, ox + lw);
+      for (let x = xa; x < xb; x++) { const c = buf[row + x - ox]; if (c) FB[o + x] = c; }
+    }
+  }
+}
+// a copy of a layer with some colours swapped (cached): used for the sunrise palette shift
+// moonlit rims: recolour filled pixels (optionally only of colour `match`)
+// whose neighbour (dx, dy) is empty or a different colour
+function rimLayer(L, col, dx, dy, match = 0, wrap = true) {
+  const src = L.buf.slice(), out = L.buf, w = L.w, h = L.h;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = y * w + x, c = src[i];
+    if (!c || (match && c !== match)) continue;
+    let nx = x + dx; const ny = y + dy;
+    if (wrap) nx = (nx % w + w) % w;
+    if (ny < 0 || ny >= h || nx < 0 || nx >= w || src[ny * w + nx] !== c) out[i] = col;
+  }
+}
+// a ridge line that wraps seamlessly over w
+function ridge(seed, w, base, comps) {
+  const r = mulberry(seed), ph = comps.map(() => r() * TAU), out = new Float32Array(w);
+  for (let x = 0; x < w; x++) {
+    let v = base;
+    for (let i = 0; i < comps.length; i++) v += Math.sin(x / w * TAU * comps[i][0] + ph[i]) * comps[i][1];
+    out[x] = v;
+  }
+  return out;
+}
+// vertical sky gradient with ordered dithering between colour stops [[worldY, colour], ...]
+function skyGrad(stops, oy = 0) {
+  for (let y = 0; y < H; y++) {
+    const wy = y + oy;
+    let k = 0;
+    while (k < stops.length - 2 && wy >= stops[k + 1][0]) k++;
+    const a = stops[k], b = stops[k + 1];
+    const t = clamp((wy - a[0]) / (b[0] - a[0]), 0, 1), o = y * W, yy = (Math.floor(wy) & 3) << 2;
+    for (let x = 0; x < W; x++) FB[o + x] = BAYER[yy | (x & 3)] < t ? b[1] : a[1];
+  }
+}
+function makeStars(seed, n, x0, x1, y0, y1) {
+  const r = mulberry(seed), out = [];
+  for (let i = 0; i < n; i++) {
+    const b = r();
+    out.push({ x: x0 + r() * (x1 - x0), y: y0 + r() * (y1 - y0), b: b < .07 ? 2 : b < .3 ? 1 : 0, ph: r() * TAU, sp: .7 + r() * 2.4 });
+  }
+  return out;
+}
+const STAR_MID = hex('#b3b6ee');
+function drawStars(stars, ox, oy, t, alpha = 1, wrapW = 0) {
+  for (const s of stars) {
+    let x = s.x - ox;
+    if (wrapW) x = ((x % wrapW) + wrapW) % wrapW;
+    x = Math.round(x);
+    const y = Math.round(s.y - oy);
+    if (x < -2 || x > W + 1 || y < -2 || y > H + 1) continue;
+    if (alpha < 1 && bay(x, y) >= alpha) continue;
+    const tw = .5 + .5 * Math.sin(t * s.sp + s.ph);
+    if (s.b === 0) { if (tw > .3) pset(x, y, tw > .85 ? C.nt7 : C.nt5); }
+    else if (s.b === 1) pset(x, y, tw > .45 ? STAR_MID : C.nt6);
+    else {
+      pset(x, y, C.white);
+      if (tw > .5) { const c = tw > .82 ? STAR_MID : C.nt6; pset(x - 1, y, c); pset(x + 1, y, c); pset(x, y - 1, c); pset(x, y + 1, c); }
+    }
+  }
+}
+// ---------------------------------------------------------------- particles
+let PARTS = [];
+function emit(o) {
+  const p = Object.assign({ x: 0, y: 0, vx: 0, vy: 0, ay: 0, drag: 0, t: 0, life: 1, type: 'glow', c: C.white, z: 1, s: 1, ph: 0 }, o);
+  PARTS.push(p);
+  return p;
+}
+function updParts(dt) {
+  for (let i = PARTS.length - 1; i >= 0; i--) {
+    const p = PARTS[i];
+    p.t += dt;
+    if (p.t >= p.life || p.dead) { PARTS[i] = PARTS[PARTS.length - 1]; PARTS.pop(); continue; }
+    p.vy += p.ay * dt;
+    if (p.drag) { const d = Math.exp(-p.drag * dt); p.vx *= d; p.vy *= d; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    if (p.upd) p.upd(p, dt);
+  }
+}
+function drawParts(z, ox, oy) {
+  for (const p of PARTS) if (p.z === z) drawPart(p, Math.round(p.x - ox), Math.round(p.y - oy));
+}
+function drawPart(p, x, y) {
+  const k = p.t / p.life, a = 1 - k;
+  switch (p.type) {
+    case 'glow': addPx(x, y, p.c, a * p.s); break;
+    case 'rain': pset(x, y, C.rain); pset(x + 1, y - 1, C.rain); break;
+    case 'seed': pset(x, y, C.seed); break;
+    case 'snow': pset(x, y, p.c || C.snow); if (p.s > 1) { pset(x + 1, y, p.c || C.snow); } break;
+    case 'leaf': pset(x, y, p.c); if (Math.floor(p.t * 4 + p.ph) & 1) pset(x + 1, y, p.c2 || p.c); else pset(x, y + 1, p.c2 || p.c); break;
+  }
+}
+
+
+// ---------------------------------------------------------------- actor: Tesla
+function newTesla(x, y, o) {
+  return Object.assign({ x, y, dir: 1, tx: null, speed: 12, moving: false, walkPh: 0, pose: 'stand', hat: true, old: false, vis: true, t: 0 }, o);
+}
+function updTesla(a, dt) {
+  a.t += dt;
+  a.moving = false;
+  if (a.tx != null) {
+    const d = a.tx - a.x, st = a.speed * dt;
+    if (Math.abs(d) <= st) { a.x = a.tx; a.tx = null; }
+    else { a.x += Math.sign(d) * st; a.dir = Math.sign(d); a.moving = true; a.walkPh += dt * a.speed / 5; }
+  }
+}
+function teslaFrame(a) {
+  const set = a.old ? TESLA_OLD : TESLA;
+  if (a.moving) {
+    const n = ['walkA', 'walkB', 'walkC', 'walkB'][Math.floor(a.walkPh) % 4];
+    return set[a.hat ? n : 'bare' + n[0].toUpperCase() + n.slice(1)];
+  }
+  return set[a.pose] || set.stand;
+}
+// (x, y) is the point between his feet; the body's centre line is column 7
+function drawTesla(a, cx, cy, solid = 0) {
+  if (!a.vis) return;
+  const f = teslaFrame(a), ax = a.dir < 0 ? f.w - 8 : 7;
+  const x = Math.round(a.x - cx) - ax, y = Math.round(a.y - cy) - f.h + 1;
+  blit(f, x, y, a.dir < 0, solid);
+  a.box = { left: x, top: y, w: f.w, h: f.h };
+}
+// where his raised hand is in the 'hold' poses (a perch for a pigeon)
+function teslaHand(a) { return [a.x + a.dir * 7, a.y - 17]; }
+
+// ---------------------------------------------------------------- actors: pigeons
+function newPigeon(o) {
+  return Object.assign({ x: 0, y: 0, dir: 1, state: 'idle', t: 0, st: 0, wait: 1, white: false, ph: rnd() * 10, speed: 42 }, o);
+}
+// send a pigeon flying to (tx, ty); it lands there (or perches, if perch is set)
+function flyTo(p, tx, ty, perch) { p.state = 'fly'; p.tx = tx; p.ty = ty; p.perch = !!perch; p.st = 0; }
+function updPigeon(p, dt) {
+  p.t += dt; p.st += dt;
+  switch (p.state) {
+    case 'fly': {
+      const dx = p.tx - p.x, dy = p.ty - p.y, d = Math.hypot(dx, dy);
+      if (d < 1.2) { p.x = p.tx; p.y = p.ty; p.state = p.perch ? 'perch' : 'idle'; p.st = 0; p.wait = rr(.3, 1.2); break; }
+      const k = Math.min(1, p.speed * dt / d);
+      p.x += dx * k; p.y += dy * k;
+      if (Math.abs(dx) > .5) p.dir = dx > 0 ? 1 : -1;
+      break;
+    }
+    case 'idle':
+      if (p.st > p.wait) {
+        const r = rnd();
+        p.st = 0;
+        if (r < .55) { p.state = 'peck'; p.dur = rr(.6, 1.6); }
+        else if (r < .85) { p.state = 'walk'; p.wx = p.x + rr(-10, 10); p.dir = p.wx > p.x ? 1 : -1; }
+        else { p.dir = -p.dir; p.wait = rr(.4, 1.2); }
+      }
+      break;
+    case 'peck': if (p.st > p.dur) { p.state = 'idle'; p.st = 0; p.wait = rr(.2, .9); } break;
+    case 'walk': {
+      const d = p.wx - p.x, st = 9 * dt;
+      if (Math.abs(d) <= st || (p.minX != null && p.x + Math.sign(d) * st < p.minX) || (p.maxX != null && p.x + Math.sign(d) * st > p.maxX)) { p.state = 'idle'; p.st = 0; p.wait = rr(.3, 1); }
+      else p.x += Math.sign(d) * st;
+      break;
+    }
+    case 'leave': p.x += p.vx * dt; p.y += p.vy * dt; p.vy -= 12 * dt; break;
+    case 'perch': break;
+  }
+}
+function pigeonFrame(p) {
+  const set = p.white ? WHITE_PIGEON : PIGEON;
+  if (p.state === 'fly' || p.state === 'leave') return (Math.floor(p.t * 11 + p.ph) & 1) ? set.up : set.down;
+  if (p.state === 'peck') return (Math.floor(p.st * 6) & 1) ? set.peck : set.stand;
+  if (p.state === 'walk') return (Math.floor(p.st * 8) & 1) ? set.peck : set.stand;
+  return set.stand;
+}
+function drawPigeon(p, cx, cy) {
+  const f = pigeonFrame(p), flip = p.dir < 0;
+  const bob = p.state === 'walk' && (Math.floor(p.st * 8) & 1) ? 0 : 0;
+  blit(f, Math.round(p.x - cx) - (flip ? 5 : 5), Math.round(p.y - cy) - 8 + bob, flip);
+}
+function drawFlock(list, cx, cy) {
+  list.sort((a, b) => a.y - b.y);
+  for (const p of list) drawPigeon(p, cx, cy);
+}
+// a handful of seed thrown from his hand
+function throwSeed(x, y, dir, groundY, n = 10) {
+  for (let i = 0; i < n; i++) {
+    const gy = groundY + rr(-4, 6);
+    emit({ type: 'seed', x, y, vx: dir * rr(8, 34), vy: rr(-16, 4), ay: 150, life: rr(4, 7), gy, z: 1,
+      upd: q => { if (q.y >= q.gy) { q.y = q.gy; q.vx = 0; q.vy = 0; q.ay = 0; } } });
+  }
+}
+
+// ---------------------------------------------------------------- film look
+// a soft vignette, a little grain and the occasional scratch, like an old projector
+const VIGNETTE = new Float32Array(W * H);
+for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+  const dx = (x + .5 - W / 2) / (W * .62), dy = (y + .5 - H / 2) / (H * .62), d = dx * dx + dy * dy;
+  VIGNETTE[y * W + x] = clamp((d - .42) * 1.6, 0, .75);
+}
+function vignette(k = 1) {
+  for (let i = 0; i < W * H; i++) if (VIGNETTE[i] > 0) blendAt(i, C.black, VIGNETTE[i] * k);
+}
+function grain(t, k = 1) {
+  const fr = Math.floor(t * 24);
+  for (let n = 0; n < 26 * k; n++) {
+    const x = Math.floor(hash2(n, fr) * W), y = Math.floor(hash2(n + 91, fr) * H);
+    blendAt(y * W + x, hash2(n + 7, fr) < .5 ? C.black : C.cream, .22);
+  }
+  if (hash2(fr, 5) < .08 * k) {
+    const x = Math.floor(hash2(fr, 6) * W);
+    for (let y = 0; y < H; y++) if (hash2(y, fr) < .8) blendAt(y * W + x, C.cream, .18);
+  }
+}
+// turn the whole frame into an old sepia photograph
+const SEPIA = ['#120c08', '#2a1c12', '#443020', '#62472f', '#836243', '#a8845c', '#cfae82', '#f1dcb4', '#fff4dc'].map(hex);
+function sepia() {
+  for (let i = 0; i < W * H; i++) {
+    const c = FB[i], l = (cR(c) * .3 + cG(c) * .59 + cB(c) * .11) / 255;
+    const q = Math.min(8, Math.floor(l * 8.99 * 1.08 + bay(i % W, (i / W) | 0) * .6));
+    FB[i] = SEPIA[q];
+  }
+}
+
+// ---------------------------------------------------------------- lightning
+// a jagged bolt by midpoint displacement, with a few forks
+function bolt(x0, y0, x1, y1, seed, rough = 14, depth = 5) {
+  const r = mulberry(seed), pts = [[x0, y0], [x1, y1]];
+  for (let d = 0; d < depth; d++) {
+    for (let i = pts.length - 1; i > 0; i--) {
+      const [ax, ay] = pts[i - 1], [bx, by] = pts[i];
+      const mx = (ax + bx) / 2 + (r() - .5) * rough, my = (ay + by) / 2 + (r() - .5) * rough * .6;
+      pts.splice(i, 0, [mx, my]);
+    }
+    rough *= .55;
+  }
+  return pts;
+}
+function drawBolt(pts, k = 1, core = C.white, halo = C.lt1) {
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, ay] = pts[i - 1], [bx, by] = pts[i];
+    lineAdd(ax + 1, ay, bx + 1, by, halo, .35 * k); lineAdd(ax - 1, ay, bx - 1, by, halo, .35 * k);
+    lineAdd(ax, ay, bx, by, core, k);
+  }
+}
+
+// ---------------------------------------------------------------- silent-film intertitles
+function drawCardFrame(ink, line) {
+  const x0 = 4, y0 = 6, x1 = W - 5, y1 = H - 7;
+  rect(x0, y0, x1 - x0 + 1, 1, line); rect(x0, y1, x1 - x0 + 1, 1, line);
+  rect(x0, y0, 1, y1 - y0 + 1, line); rect(x1, y0, 1, y1 - y0 + 1, line);
+  rect(x0 + 2, y0 + 2, x1 - x0 - 3, 1, ink); rect(x0 + 2, y1 - 2, x1 - x0 - 3, 1, ink);
+  rect(x0 + 2, y0 + 2, 1, y1 - y0 - 3, ink); rect(x1 - 2, y0 + 2, 1, y1 - y0 - 3, ink);
+  // stepped Art Deco corners
+  for (const [cx, cy, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]]) {
+    for (let i = 0; i < 4; i++) { rect(Math.min(cx, cx + sx * (6 - i)), cy + sy * (4 + i), 1, 1, line); rect(cx + sx * (4 + i), Math.min(cy, cy + sy * (6 - i)), 1, 1, line); }
+    pset(cx + sx * 4, cy + sy * 4, ink); pset(cx + sx * 5, cy + sy * 5, line);
+  }
+  // little fans at the middle of the top and bottom edges
+  for (const [yy, sy] of [[y0, 1], [y1, -1]]) {
+    for (let a = -3; a <= 3; a++) pset(W / 2 + a, yy + sy * (Math.abs(a) < 2 ? 2 : 1), line);
+    pset(W / 2, yy + sy * 3, ink); pset(W / 2 - 1, yy + sy * 3, ink); pset(W / 2 + 1, yy + sy * 3, ink);
+  }
+}
+function card(text, dur, o = {}) {       // o: { light, tin, tout }
+  const lines = wrapText(text, 74);
+  return {
+    name: 'card', dur, tin: o.tin || 'fade', tinDur: .6, tout: o.tout || 'fade', toutDur: .6, card: true,
+    init(S) { announce(text); },
+    update() {},
+    draw(S) {
+      const light = !!o.light, bg = light ? C.paper : C.black, ink = light ? C.ink : C.cream, line = light ? C.creamD : C.creamD;
+      rect(0, 0, W, H, bg);
+      drawCardFrame(light ? C.wl1 : C.cream, line);
+      const lh = 8, y0 = Math.round((H - lines.length * lh) / 2) + 1;
+      const shown = Math.floor(S.t * 34);
+      let n = shown;
+      lines.forEach((ln, i) => {
+        drawText(ln.slice(0, Math.max(0, n)), Math.round((W - textWidth(ln)) / 2), y0 + i * lh, ink);
+        n -= ln.length + 1;
+      });
+      if (!light) { grain(S.t, .7); vignette(.8); }
+    },
+  };
+}
+
+// ---------------------------------------------------------------- captions
+const liveRegion = document.getElementById('captions');
+function announce(text) { liveRegion.textContent = text.replace(/[♥✓▶♪★]/g, '').replace(/\n/g, ' ').trim(); }
+function caption(text, dur = 4, pos = 'top') {
+  S.cap = { text, lines: wrapText(text, 88), t: 0, dur, pos };
+  announce(text);
+}
+function drawCaption() {
+  const c = S.cap;
+  if (!c) return;
+  const fade = c.t > c.dur - .35 ? clamp((c.dur - c.t) / .35, 0, 1) : clamp(c.t / .2, 0, 1);
+  const lh = 7, h = c.lines.length * lh + 5, lb = Math.round(S.lb * 13);
+  const y0 = c.pos === 'top' ? 3 + lb : c.pos === 'mid' ? Math.round((H - h) / 2) : H - h - 3 - lb;
+  brect(0, y0, W, h, C.ink, .62 * fade);
+  drect(0, y0 - 1, W, 1, C.ink, .5 * fade);
+  drect(0, y0 + h, W, 1, C.ink, .5 * fade);
+  let shown = Math.floor(c.t * 32);
+  c.lines.forEach((ln, i) => {
+    const part = ln.slice(0, Math.max(0, shown));
+    shown -= ln.length + 1;
+    drawText(part, Math.round((W - textWidth(ln)) / 2), y0 + 3 + i * lh, mix(C.ink, C.cream, fade));
+  });
+}
+// ---------------------------------------------------------------- transitions
+// p: 0 = clear, 1 = fully covered
+function applyMask(kind, p, dir, cx, cy) {
+  if (p <= 0) return;
+  const col = kind === 'white' ? C.white : C.black;
+  if (p >= 1) { rect(0, 0, W, H, col); return; }
+  if (kind === 'fade' || kind === 'white') { brect(0, 0, W, H, col, Math.round(p * 10) / 10); return; }
+  if (kind === 'wipe') {
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const u = (x + y * .35) / (W + H * .35), e = bay(x, y) * .08;
+      if (dir === 'out' ? u < p * 1.08 - .08 + e : u > 1.08 - p * 1.08 - e) FB[y * W + x] = C.black;
+    }
+    return;
+  }
+  const r2 = ((1 - p) * 105) ** 2;              // iris
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const dx = x + .5 - cx, dy = y + .5 - cy;
+    if (dx * dx + dy * dy >= r2) FB[y * W + x] = C.black;
+  }
+}
+
+// ---------------------------------------------------------------- scenery helpers
+const cache = {};
+const once = (k, f) => cache[k] || (cache[k] = f());
+
+// ---------------------------------------------------------------- scene machinery
+let S = null, SI = 0;
+const SCENES = [];
+const TR = { phase: 'none', t: 0, dur: 0, kind: 'fade', next: 0, cx: W / 2, cy: H / 2 };
+const at = t => S.pt < t && S.t >= t;
+const REDUCED = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+const themeMeta = document.querySelector('meta[name="theme-color"]');
+function startScene(i) {
+  SI = i;
+  const sc = SCENES[i];
+  rnd = mulberry(1000 + i * 77);
+  PARTS = [];
+  S = { t: 0, pt: -1, sc, cam: { x: 0, y: 0 }, ox: 0, oy: 0, shake: 0, flash: 0, flashC: C.white, lb: 0, cap: null, dustC: C.du1, focus: null };
+  sc.init(S);
+}
+// let the page around the canvas continue the colours at its top and bottom edges
+const backTop = document.getElementById('backTop'), backBottom = document.getElementById('backBottom');
+function rowColour(y) {
+  let r = 0, g = 0, b = 0;
+  for (let x = 0; x < W; x++) { const c = FB[y * W + x]; r += cR(c); g += cG(c); b += cB(c); }
+  return 'rgb(' + (r / W | 0) + ',' + (g / W | 0) + ',' + (b / W | 0) + ')';
+}
+function syncBackdrop() {
+  const top = rowColour(0), portrait = window.innerHeight / window.innerWidth > H / W;
+  const bottom = portrait ? rowColour(H - 1) : top;
+  if (backTop.dataset.c !== top) { backTop.dataset.c = top; backTop.style.backgroundColor = top; if (themeMeta) themeMeta.content = top; }
+  if (backBottom.dataset.c !== bottom) { backBottom.dataset.c = bottom; backBottom.style.backgroundColor = bottom; }
+}
+function goTo(i) {
+  if (TR.phase === 'out') return;
+  const cur = SCENES[SI];
+  TR.next = (i + SCENES.length) % SCENES.length;
+  TR.kind = cur.tout || 'fade';
+  TR.dur = TR.kind === 'cut' ? 0 : cur.toutDur || .7;
+  const f = S.focus || [W / 2, H / 2];
+  TR.cx = f[0]; TR.cy = f[1];
+  TR.phase = 'out'; TR.t = 0;
+}
+function update(dt) {
+  if (TR.phase === 'out') {
+    TR.t += dt;
+    if (TR.t >= TR.dur) {
+      startScene(TR.next);
+      const sc = SCENES[SI];
+      TR.kind = sc.tin || 'fade';
+      TR.dur = TR.kind === 'cut' ? 0 : sc.tinDur || .7;
+      TR.t = 0; TR.phase = 'in';
+      const f = S.focus || [W / 2, H / 2];
+      TR.cx = f[0]; TR.cy = f[1];
+    }
+  } else if (TR.phase === 'in') {
+    TR.t += dt;
+    if (TR.t >= TR.dur) TR.phase = 'none';
+  }
+  S.pt = S.t; S.t += dt;
+  S.sc.update(S, dt);
+  updParts(dt);
+  if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 5);
+  if (S.flash > 0) S.flash = Math.max(0, S.flash - dt * 2.2);
+  if (S.cap) { S.cap.t += dt; if (S.cap.t > S.cap.dur) S.cap = null; }
+  if (TR.phase === 'none' && S.sc.dur && S.t >= S.sc.dur) goTo(SI + 1);
+}
+const vrnd = mulberry(4242);
+let frameNo = 0;
+function render() {
+  target(null);
+  const sh = S.shake > 0 && !REDUCED ? S.shake : 0;
+  S.ox = sh ? Math.round((vrnd() * 2 - 1) * sh) : 0;
+  S.oy = sh ? Math.round((vrnd() * 2 - 1) * sh) : 0;
+  S.sc.draw(S);
+  if (S.flash > 0) {
+    const a = Math.round(Math.min(1, S.flash) * 6) / 6 * (REDUCED ? .4 : 1);
+    if (a > 0) brect(0, 0, W, H, S.flashC, a);
+  }
+  if (S.lb > 0) { const h = Math.round(S.lb * 13); rect(0, 0, W, h, C.black); rect(0, H - h, W, h, C.black); }
+  drawCaption();
+  if (TR.phase !== 'none' && TR.dur > 0) {
+    const p = clamp(TR.t / TR.dur, 0, 1);
+    const e = E.inOut(p);
+    applyMask(TR.kind, TR.phase === 'out' ? e : 1 - e, TR.phase, TR.cx, TR.cy);
+  }
+  ctx.putImageData(IMG, 0, 0);
+  if (++frameNo % 20 === 1) syncBackdrop();
+}
+
+
+// ================================================================= THE STORY
+const SKY_NIGHT = [[-140, C.nt0], [-60, C.nt1], [0, C.nt1], [30, C.nt2], [55, C.nt3], [75, C.nt4], [92, C.dk0], [108, C.dk1]];
+const SKY_DUSK = [[-140, C.nt1], [-70, C.nt2], [-20, C.nt3], [10, C.nt4], [34, C.dk0], [52, C.dk1], [66, C.dk2], [80, C.dk3], [92, C.dk4], [104, C.dk5]];
+
+// ---------------------------------------------------------------- scenery: the city skyline
+function waterTower(x, base, col) {
+  rect(x, base - 3, 1, 3, col); rect(x + 4, base - 3, 1, 3, col);
+  rect(x - 1, base - 9, 7, 6, col);
+  for (let i = 0; i < 3; i++) rect(x - 1 + i, base - 10 - i, 7 - i * 2, 1, col);
+}
+// towers with lit windows; the windows are returned so they can twinkle
+function buildSkyline(seed, w, h, o) {
+  const r = mulberry(seed), wins = [];
+  const L = layer(w, h, L => {
+    let x = 0;
+    while (x < w) {
+      const bw = Math.floor(o.minW + r() * (o.maxW - o.minW)), bh = Math.floor(o.minH + r() * (o.maxH - o.minH));
+      const top = h - bh;
+      rect(x, top, bw, bh, o.col);
+      // Art Deco setbacks and the odd spire
+      if (r() < o.setback) { rect(x + 2, top - 5, bw - 4, 5, o.col); if (bw > 8 && r() < .5) { rect(x + 4, top - 9, bw - 8, 4, o.col); if (r() < .6) rect(x + Math.floor(bw / 2), top - 15, 1, 6, o.col); } }
+      if (o.tanks && r() < .5 && bw > 8) waterTower(x + 2 + Math.floor(r() * (bw - 8)), top, o.col);
+      for (let yy = top + 3; yy < h - 2; yy += o.wy) for (let xx = x + 2; xx < x + bw - 1; xx += o.wx) {
+        const lit = r() < o.lit;
+        pset(xx, yy, lit ? (r() < .5 ? C.wl2 : C.wl3) : o.dark);
+        if (lit) wins.push([xx, yy, r() * 20, r() < .15]);
+      }
+      x += bw + (r() < .3 ? 1 : 0);
+    }
+    rimLayer(L, o.rim, -1, 0, o.col);
+  });
+  return { L, wins };
+}
+function drawSkylineWins(S, sk, ox, oy, wrapW) {
+  // a few windows switch on and off over time
+  for (const [x, y, ph, tw] of sk.wins) {
+    if (!tw) continue;
+    let sx = x - ox; if (wrapW) sx = ((sx % wrapW) + wrapW) % wrapW;
+    if ((Math.sin(S.t * .35 + ph) > .2)) continue;
+    pset(sx, y - oy, C.bd1);
+  }
+}
+function drawMoon(x, y, k = 1) {
+  glow(x + 6.5, y + 6.5, 26, C.mo1, .14 * k, 8, false);
+  glow(x + 6.5, y + 6.5, 13, C.mo1, .16 * k, 6, false);
+  blit(MOON, x, y);
+}
+const CITY = {};
+function city() {
+  if (CITY.far) return CITY;
+  CITY.far = buildSkyline(11, 192, 70, { minW: 7, maxW: 16, minH: 26, maxH: 62, col: C.bd2, rim: C.bd3, dark: C.bd1, lit: .22, wx: 2, wy: 3, setback: .45, tanks: false });
+  CITY.mid = buildSkyline(23, 192, 44, { minW: 10, maxW: 22, minH: 14, maxH: 34, col: C.bd1, rim: C.bd2, dark: C.bd0, lit: .3, wx: 3, wy: 4, setback: .15, tanks: true });
+  CITY.stars = makeStars(5, 90, 0, 192, -140, 80);
+  return CITY;
+}
+function drawCity(S, o = {}) {
+  const c = city(), cx = S.cam.x + S.ox, cy = S.cam.y + S.oy, t = S.t;
+  skyGrad(o.sky || SKY_NIGHT, cy * .2);
+  drawStars(c.stars, cx * .05, cy * .15, t, o.starA == null ? 1 : o.starA, 192);
+  if (o.moon) drawMoon(o.moon[0] - cx * .08, o.moon[1] - cy * .2);
+  if (o.sky2) o.sky2(cx, cy);
+  const fy = (o.farY || 64) - cy * .45, my = (o.midY || 82) - cy * .7;
+  drawLayer(c.far.L, -cx * .25, fy);
+  drawSkylineWins(S, c.far, -Math.round(-cx * .25), -Math.round(fy), 192);
+  for (let y = 0; y < 14; y++) drect(0, Math.round(my) + 18 + y, W, 1, C.nt3, .18 * (1 - y / 14));
+  drawLayer(c.mid.L, -cx * .45, my);
+  drawSkylineWins(S, c.mid, -Math.round(-cx * .45), -Math.round(my), 192);
+}
+
+
+// ---------------------------------------------------------------- scenery: a New York street at night
+function streetLamp(x, base, cy, lit = true) {
+  const y = base - cy;
+  rect(x, y - 30, 1, 30, C.tc0); rect(x - 1, y - 3, 3, 3, C.tc0);
+  rect(x - 2, y - 34, 5, 4, C.tc1); rect(x - 1, y - 35, 3, 1, C.tc0);
+  if (lit) {
+    rect(x - 1, y - 33, 3, 2, C.lamp);
+    glow(x + .5, y - 32, 13, C.wl2, .22, 6, false);
+    glow(x + .5, y - 32, 6, C.wl3, .35, 4, false);
+  }
+}
+function lampPool(x, y) {                 // the warm pool of light on the ground
+  for (let j = -3; j <= 3; j++) for (let i = -14; i <= 14; i++) {
+    const d = (i / 14) ** 2 + (j / 3.2) ** 2;
+    if (d < 1) addPx(x + i, y + j, C.wl2, (1 - d) * .22);
+  }
+}
+function buildStreet() {
+  const r = mulberry(31), wins = [];
+  const facades = layer(240, 96, L => {
+    let x = 0;
+    while (x < 240) {
+      const bw = 22 + Math.floor(r() * 16), bh = 58 + Math.floor(r() * 30), top = 96 - bh;
+      const brick = r() < .5, base = brick ? C.br1 : C.bd2, dark = brick ? C.br0 : C.bd1;
+      rect(x, top, bw, bh, base);
+      rect(x, top, bw, 2, brick ? C.br2 : C.bd3);            // cornice
+      rect(x - 1, top + 2, bw + 2, 1, dark);
+      for (let yy = top + 6; yy < 76; yy += 11) for (let xx = x + 3; xx < x + bw - 4; xx += 7) {
+        const lit = r() < .22;
+        rect(xx, yy, 4, 7, lit ? C.wl2 : C.bd0);
+        if (lit) { rect(xx, yy, 4, 3, C.wl3); wins.push([xx, yy]); }
+        rect(xx - 1, yy + 7, 6, 1, brick ? C.br2 : C.bd3);
+      }
+      if (r() < .45) {                                         // an iron fire escape
+        const fx = x + 3, fw = bw - 7;
+        for (let yy = top + 13; yy < 72; yy += 11) {
+          rect(fx, yy, fw, 1, C.tc0);
+          for (let i = 0; i < fw; i += 2) pset(fx + i, yy - 1, C.tc0);
+          line(fx + 2, yy, fx + fw - 3, yy + 11, C.tc0);
+        }
+      }
+      // the ground floor: a shop window or a stoop
+      if (r() < .5) { rect(x + 3, 78, bw - 6, 12, C.bd0); rect(x + 4, 79, bw - 8, 10, r() < .4 ? C.wl1 : C.bd1); rect(x + 2, 76, bw - 4, 2, C.dk2); }
+      else { rect(x + bw / 2 - 3, 80, 6, 16, C.bd0); for (let i = 0; i < 4; i++) rect(x + bw / 2 - 5 - i, 92 + i, 10 + i * 2, 1, C.sn2); }
+      x += bw;
+    }
+  });
+  return { facades, wins };
+}
+function drawStreet(S, st) {
+  const cx = S.cam.x + S.ox, cy = S.cam.y + S.oy, t = S.t, c = city();
+  skyGrad(SKY_NIGHT, cy * .2 - 30);
+  drawStars(c.stars, cx * .05, 60, t, 1, 192);
+  drawLayer(c.far.L, -cx * .15, -6);
+  drawLayer(st.facades, -cx * .6, 8 - cy);
+  rect(0, 104 - cy, W, 6, C.pv1);                               // sidewalk
+  for (let x = ((-cx) % 12 + 12) % 12 - 12; x < W; x += 12) rect(x, 104 - cy, 1, 6, C.pv0);
+  rect(0, 104 - cy, W, 1, C.pv2);
+  rect(0, 110 - cy, W, 1, C.sn3); rect(0, 111 - cy, W, 9, C.as0 || C.bd0);
+  for (let x = ((-cx * 1.0) % 30 + 30) % 30 - 30; x < W; x += 30) rect(x, 116 - cy, 10, 1, C.bd2);
+  for (let lx = Math.floor(cx / 64) * 64 + 30; lx < cx + W + 40; lx += 64) lampPool(lx - cx, 106 - cy);
+}
+function drawStreetLamps(S) {
+  const cx = S.cam.x + S.ox, cy = S.cam.y + S.oy;
+  for (let lx = Math.floor(cx / 64) * 64 + 30; lx < cx + W + 40; lx += 64) streetLamp(Math.round(lx - cx), 106, cy);
+}
+
+// ---------------------------------------------------------------- scenery: the public library
+function buildLibrary() {
+  return layer(96, 120, L => {
+    rect(0, 0, 96, 120, C.nt1);
+    // facade
+    rect(0, 16, 96, 72, C.sn2);
+    rect(0, 16, 96, 3, C.sn4); rect(0, 19, 96, 1, C.sn1); rect(0, 22, 96, 4, C.sn3); rect(0, 26, 96, 1, C.sn1);
+    for (let x = 1; x < 96; x += 4) rect(x, 23, 2, 2, C.sn2);      // frieze
+    // three arches between paired columns
+    for (const ax of [12, 42, 72]) {
+      rect(ax, 40, 14, 44, C.sn0);
+      disc(ax + 7, 40, 7, C.sn0);
+      rect(ax + 2, 44, 10, 40, C.wl1); disc(ax + 7, 44, 5, C.wl1);
+      rect(ax + 3, 46, 8, 38, C.wl2);
+      for (let y = 50; y < 84; y += 8) rect(ax + 2, y, 10, 1, C.wl0);
+      rect(ax + 6, 44, 1, 40, C.wl0);
+    }
+    for (const cx of [4, 32, 34, 62, 64, 92]) {
+      rect(cx - 2, 28, 5, 56, C.sn4); rect(cx - 2, 28, 1, 56, C.sn5); rect(cx + 2, 28, 1, 56, C.sn3);
+      for (let y = 30; y < 84; y += 3) pset(cx, y, C.sn3);
+      rect(cx - 3, 27, 7, 2, C.sn5); rect(cx - 3, 83, 7, 2, C.sn3);
+    }
+    rect(0, 84, 96, 4, C.sn3);
+    // the steps
+    for (let i = 0; i < 6; i++) { rect(0, 88 + i * 2, 96, 1, C.sn4); rect(0, 89 + i * 2, 96, 1, C.sn2); }
+    // the plaza
+    rect(0, 100, 96, 20, C.sn1);
+    for (let y = 102; y < 120; y += 5) rect(0, y, 96, 1, C.sn0);
+    for (let y = 100; y < 120; y += 5) for (let x = (y / 5 & 1) * 6; x < 96; x += 12) rect(x, y, 1, 5, C.sn0);
+    // the lion on its plinth
+    rect(2, 84, 32, 16, C.sn3); rect(2, 84, 32, 2, C.sn5); rect(2, 98, 32, 2, C.sn1); rect(2, 84, 1, 16, C.sn4);
+    blit(PROP.lion, 4, 70);
+  });
+}
+function drawLibraryLamps(t) {
+  for (const x of [40, 86]) {
+    rect(x, 76, 1, 24, C.tc0); rect(x - 2, 98, 5, 2, C.tc0);
+    rect(x - 2, 72, 5, 4, C.tc1); rect(x - 1, 73, 3, 2, C.lamp);
+    glow(x + .5, 74, 18, C.wl2, .28, 6, false); glow(x + .5, 74, 6, C.wl3, .35, 4, false);
+  }
+}
+
+
+// ---------------------------------------------------------------- scenery: his hotel room
+const WIN = { x: 58, y: 14, w: 30, h: 52 };          // the window opening
+function buildRoom() {
+  return layer(96, 120, L => {
+    // wallpaper with a faint repeating motif
+    rect(0, 0, 96, 80, C.rm1);
+    for (let y = 2; y < 78; y += 6) for (let x = ((y / 6) & 1) * 3; x < 96; x += 6) { pset(x, y, C.rm2); pset(x + 1, y + 1, C.rm2); pset(x - 1, y + 1, C.rm2); pset(x, y + 2, C.rm2); }
+    rect(0, 12, 96, 1, C.wd1);
+    // wainscot, rail and skirting
+    rect(0, 78, 96, 2, C.wd3); rect(0, 80, 96, 22, C.wd1);
+    for (let x = 2; x < 96; x += 16) { rect(x, 83, 12, 1, C.wd0); rect(x, 83, 1, 15, C.wd0); rect(x + 12, 83, 1, 15, C.wd2); rect(x, 97, 13, 1, C.wd2); }
+    rect(0, 100, 96, 2, C.wd0);
+    // floorboards
+    rect(0, 102, 96, 18, C.wd2);
+    for (let y = 104; y < 120; y += 3) rect(0, y, 96, 1, C.wd1);
+    for (let y = 102; y < 120; y += 3) for (let x = ((y * 7) % 23); x < 96; x += 23) pset(x, y + 1, C.wd1);
+    // the window: frame, open lower sash, sill; the panes are left clear for the view
+    const { x, y, w, h } = WIN;
+    rect(x - 3, y - 3, w + 6, h + 6, C.wd2);
+    rect(x - 2, y - 2, w + 4, 1, C.wd4); rect(x - 2, y - 2, 1, h + 4, C.wd3);
+    for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) L.buf[yy * 96 + xx] = 0;
+    rect(x, y + 22, w, 3, C.wd3); rect(x, y + 22, w, 1, C.wd4);
+    rect(x + w / 2 - 1, y, 2, 22, C.wd3);
+    rect(x - 5, y + h, w + 10, 3, C.wd3); rect(x - 5, y + h, w + 10, 1, C.wd4); rect(x - 4, y + h + 3, w + 8, 1, C.wd1);
+    // heavy curtains
+    for (const [cx0, dir] of [[x - 12, 1], [x + w + 3, -1]]) {
+      rect(cx0, 4, 9, 76, C.br2);
+      for (let i = 0; i < 9; i += 3) rect(cx0 + i, 4, 1, 76, C.br1);
+      rect(cx0 + (dir > 0 ? 8 : 0), 4, 1, 76, C.br3);
+    }
+    rect(x - 14, 3, w + 28, 2, C.wd3);
+    // the iron bed: headboard with bars and brass knobs, pillow, a blanket hanging down the side
+    rect(2, 60, 2, 42, C.tc3); rect(15, 64, 2, 22, C.tc3);
+    rect(2, 60, 15, 2, C.tc3); rect(2, 66, 15, 1, C.tc2);
+    for (let i = 5; i < 15; i += 3) rect(i, 62, 1, 18, C.tc2);
+    pset(2, 59, C.wl2); pset(3, 59, C.wl2); pset(15, 63, C.wl2); pset(16, 63, C.wl2);
+    rect(40, 74, 2, 28, C.tc3); pset(40, 73, C.wl2); pset(41, 73, C.wl2);
+    rect(4, 80, 37, 5, C.ln2); rect(4, 80, 37, 1, C.ln3);
+    rect(5, 76, 10, 4, C.ln3); rect(5, 79, 10, 1, C.ln2);
+    rect(15, 79, 26, 13, C.ln1); rect(15, 79, 26, 1, C.ln2);
+    for (let x = 19; x < 41; x += 6) rect(x, 83, 1, 9, C.ln0);
+    rect(15, 91, 26, 1, C.ln0);
+    rect(4, 99, 2, 3, C.tc2); rect(38, 99, 2, 3, C.tc2);
+    // the desk under the window
+    rect(54, 82, 40, 2, C.wd4); rect(54, 84, 40, 1, C.wd2);
+    rect(76, 85, 17, 15, C.wd2); rect(76, 85, 17, 1, C.wd3);
+    for (const dy of [89, 95]) { rect(78, dy, 13, 1, C.wd1); pset(84, dy + 2, C.wl2); }
+    rect(55, 84, 2, 18, C.wd2); rect(91, 84, 2, 18, C.wd2);
+    // papers and books
+    rect(58, 80, 9, 2, C.paper); rect(60, 79, 8, 1, C.paper); pset(62, 80, C.ln1); pset(64, 80, C.ln1);
+    rect(80, 76, 3, 6, C.br3); rect(83, 77, 3, 5, C.lgr1); rect(86, 78, 2, 4, C.wd3);
+    blit(PROP.lamp, 84, 68);
+    // the chair at the desk
+    rect(46, 90, 10, 2, C.wd3); rect(46, 72, 2, 30, C.wd2); rect(54, 92, 2, 10, C.wd2); rect(46, 72, 2, 1, C.wd4);
+  });
+}
+function drawWindowView(S, sky, starA, moon, cx) {
+  const { x, y, w, h } = WIN, c = city();
+  for (let yy = y; yy < y + h; yy++) {
+    const t = (yy - y) / h, i = clamp(Math.floor(t * (sky.length - 1)), 0, sky.length - 2), f = t * (sky.length - 1) - i;
+    for (let xx = x; xx < x + w; xx++) FB[yy * W + xx] = bay(xx, yy) < f ? sky[i + 1] : sky[i];
+  }
+  if (starA > 0) for (const st of c.stars) {
+    const sx = x + ((st.x * .5 - cx * .1) % w + w) % w, sy = y + ((st.y + 140) * .15) % (h - 16);
+    if (bay(Math.round(sx), Math.round(sy)) < starA) pset(sx, sy, (Math.sin(S.t * st.sp + st.ph) > 0) ? C.white : C.nt6);
+  }
+  if (moon) { glow(x + 21, y + 9, 10, C.mo1, .16, 5, false); disc(x + 21, y + 9, 3, C.moon); }
+  const sk = c.far.L;
+  for (let yy = y + 26; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) {
+    const lx = ((xx - x + Math.round(cx * .2) + 40) % sk.w + sk.w) % sk.w, ly = yy - (y + h) + sk.h;
+    const col = ly >= 0 ? sk.buf[ly * sk.w + lx] : 0;
+    if (col) FB[yy * W + xx] = col;
+  }
+}
+function drawRoom(S, o) {
+  const cx = S.cam.x + S.ox;
+  drawWindowView(S, o.sky, o.starA, o.moon, cx);
+  if (o.weather) o.weather();
+  drawLayer(S.room, 0, 0, false);
+  if (o.dark) brect(0, 0, W, H, C.nt0, o.dark);
+  if (o.lamp) { glow(89.5, 70, 34, C.wl2, .3 * o.lamp, 7, false); glow(89.5, 70, 10, C.wl3, .35 * o.lamp, 4, false); rect(86, 71, 7, 1, C.wl3); }
+  if (o.moonShaft) {                     // cool moonlight falling through the window onto the floor
+    const k = o.moonShaft;
+    for (let yy = WIN.y + WIN.h + 3; yy < H; yy++) {
+      const d = yy - (WIN.y + WIN.h), x0 = WIN.x - d * .7, x1 = WIN.x + WIN.w - d * .3;
+      for (let xx = Math.max(0, Math.floor(x0)); xx < Math.min(W, x1); xx++) addPx(xx, yy, C.nt6, .2 * k);
+    }
+  }
+}
+const SKY_WIN_NIGHT = [C.nt1, C.nt2, C.nt3, C.nt4].map(c => c);
+const SKY_WIN_DAY = [hex('#6f8fc0'), hex('#8fb0d8'), hex('#b8cde6'), hex('#d8e2ee')];
+const SKY_WIN_DAWN = [C.dk1, C.dk3, C.dk5, C.dk6];
+function mixSky(a, b, k) { return a.map((c, i) => mix(c, b[i], k)); }
+
+// ---- title
+function flyer(S, t0, dur, y0, y1) {       // a white pigeon crossing the sky
+  const k = (S.t - t0) / dur;
+  if (k < 0 || k > 1) return;
+  const x = lerp(-12, W + 12, k), y = lerp(y0, y1, k) + Math.sin(k * 9) * 1.5;
+  const f = (Math.floor(S.t * 9) & 1) ? WHITE_PIGEON.up : WHITE_PIGEON.down;
+  glow(x, y - 4, 6, C.wp2, .18, 4, false);
+  blit(f, Math.round(x) - 5, Math.round(y) - 8);
+}
+SCENES.push({
+  name: 'title', dur: 8, tin: 'fade', tinDur: 1.2, tout: 'fade', toutDur: 1,
+  init(S) { S.cam.y = -10; },
+  update(S, dt) { S.cam.y = lerp(-10, 0, E.inOut(prog(S.t, 0, 8))); },
+  draw(S) {
+    const t = S.t;
+    drawCity(S, { moon: [56, 42], sky2: () => flyer(S, 2.2, 5.5, 52, 44) });
+    const la = prog(t, .6, 2.2), ly = 14;
+    if (la > 0) {
+      blit(LOGO, 28, ly, false, 0, la);
+      if (la >= 1) {
+        const k = Math.floor(t * 6);
+        if (hash2(k, 3) < .35) drawBolt(bolt(29 + hash2(k, 4) * 36, ly + 1, 29 + hash2(k, 5) * 36, ly - 5 + hash2(k, 6) * 3, k, 6, 3), .7);
+      }
+    }
+    const sub = 'AND THE WHITE PIGEON', n = Math.floor((t - 2.4) * 16);
+    if (n > 0) drawText(sub.slice(0, n), Math.round((W - textWidth(sub)) / 2), 31, C.cream, C.ink);
+    vignette(.9);
+    if (t > 3.4 && (Math.floor(t * 1.6) & 1)) { const h = 'TAP TO SKIP'; drawText(h, Math.round((W - textWidth(h)) / 2), 111, C.txDim, C.ink); }
+  },
+});
+
+SCENES.push(card("NIKOLA TESLA'S INVENTIONS HELPED BRING ELECTRIC LIGHT AND POWER TO THE WORLD.", 5));
+
+// ---- the laboratory, years before (an old sepia photograph)
+function drawCoil(x, base, t) {
+  // wooden platform, the wide primary, the tall secondary and the copper ball on top
+  rect(x - 22, base - 4, 44, 4, C.wd2); rect(x - 22, base - 4, 44, 1, C.wd3);
+  for (let i = 0; i < 3; i++) rect(x - 18 + i, base - 8 - i * 2, 36 - i * 2, 2, i & 1 ? C.cp1 : C.cp2);
+  for (let y = base - 58; y < base - 12; y++) rect(x - 5, y, 10, 1, (y & 1) ? C.cp1 : C.cp2);
+  rect(x - 5, base - 58, 1, 46, C.cp0); rect(x + 4, base - 58, 1, 46, C.cp3);
+  disc(x, base - 64, 8, C.cp1); disc(x - 1, base - 65, 6, C.cp2); disc(x - 3, base - 67, 2, C.cp3);
+}
+SCENES.push({
+  name: 'lab', dur: 7.2, tin: 'fade', tinDur: .8, tout: 'fade', toutDur: .8,
+  init(S) { S.tesla = newTesla(30, 106, { hat: false, pose: 'bare' }); },
+  update(S, dt) { updTesla(S.tesla, dt); },
+  draw(S) {
+    const t = S.t, cx = 64, cy = 106 - 64;
+    rect(0, 0, W, H, C.lb1);
+    for (let x = 2; x < W; x += 7) rect(x, 0, 1, 96, C.lb0);
+    rect(0, 96, W, 24, C.lb2);
+    for (let y = 98; y < H; y += 5) rect(0, y, W, 1, C.lb1);
+    const fr = Math.floor(t * 14), big = hash2(fr, 9) < .25;
+    const k = .55 + .45 * hash2(fr, 1);
+    glow(cx, cy, 40 + (big ? 20 : 0), C.lt1, .22 * k, 6, false);
+    drawCoil(cx, 106, t);
+    drawTesla(S.tesla, 0, 0);
+    const n = 2 + Math.floor(hash2(fr, 2) * 3);
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI * (.05 + .9 * hash2(fr, i + 10)), len = 30 + hash2(fr, i + 20) * 34;
+      drawBolt(bolt(cx, cy, cx + Math.cos(a) * len * 1.3, cy + Math.sin(a) * len, fr * 7 + i, 16, 5), k);
+    }
+    if (big) drawBolt(bolt(cx - 6, cy + 2, 30, 102, fr * 13, 18, 5), 1);
+    sepia();
+    if (big) brect(0, 0, W, H, C.cream, .12);
+    grain(t, 1.2);
+    vignette(1.1);
+  },
+});
+
+SCENES.push(card('IN HIS LATER YEARS, HE LIVED ALONE, IN HOTELS IN NEW YORK CITY.', 4.4));
+
+// ---- his hotel window at dusk
+function drawHotelFacade(x0, y0, cx, cy, litIdx, sil) {
+  const fx = x0 - cx, fy = y0 - cy;
+  rect(fx, fy, 80, 200, C.br1);
+  for (let y = 0; y < 200; y += 3) for (let x = (y / 3 & 1) * 2; x < 80; x += 4) pset(fx + x, fy + y, C.br0);
+  rect(fx, fy, 1, 200, C.br2);
+  let i = 0;
+  for (let row = 0; row < 11; row++) for (let col = 0; col < 5; col++, i++) {
+    const wx = fx + 6 + col * 15, wy = fy + 8 + row * 18;
+    const lit = i === litIdx || hash2(i, 77) < .2;
+    rect(wx - 1, wy - 1, 10, 14, C.br0);
+    rect(wx, wy, 8, 12, lit ? C.wl2 : C.bd1);
+    if (lit) { rect(wx, wy, 8, 5, C.wl3); glow(wx + 4, wy + 6, 9, C.wl2, .14, 4, false); }
+    else pset(wx + 1, wy + 1, C.bd3);
+    rect(wx, wy + 6, 8, 1, C.br0); rect(wx + 4, wy, 1, 12, C.br0);
+    rect(wx - 2, wy + 12, 12, 2, C.sn2);
+    if (i === litIdx && sil) {
+      disc(wx + 4, wy + 6, 2.2, C.tc0); rect(wx + 1, wy + 9, 7, 3, C.tc0); pset(wx + 6, wy + 6, C.tc0);
+    }
+  }
+}
+SCENES.push({
+  name: 'hotel', dur: 8, tin: 'fade', tinDur: .8, tout: 'fade', toutDur: .8,
+  init(S) { S.cam.y = -70; S.focus = [45, 64]; },
+  update(S, dt) { S.cam.y = lerp(-70, 36, E.inOut(prog(S.t, .3, 6.8))); },
+  draw(S) {
+    const cx = S.cam.x, cy = S.cam.y;
+    drawCity(S, { sky: SKY_DUSK, moon: [12, 18], starA: .6, farY: 70, midY: 88 });
+    drawHotelFacade(30, 46, cx, cy, 16, true);
+    const k = prog(S.t, 4.5, 7);
+    if (k > 0) glow(30 + 6 + 15 + 4 - cx, 46 + 8 + 3 * 18 + 6 - cy, 9, C.wl3, .16 * k, 4, false);
+    vignette(.7);
+  },
+});
+
+SCENES.push(card('NEARLY EVERY DAY, OFTEN AFTER MIDNIGHT, HE WENT OUT TO FEED THE PIGEONS.', 5));
+
+// ---- the walk
+SCENES.push({
+  name: 'walk', dur: 9.2, tin: 'fade', tinDur: .8, tout: 'fade', toutDur: .8,
+  init(S) {
+    S.st = once('street', buildStreet);
+    S.tesla = newTesla(24, 106, { tx: 158, speed: 13.5 });
+    S.cam.x = S.tesla.x - 34;
+    S.carX = 260;
+    S.focus = [48, 70];
+  },
+  update(S, dt) {
+    updTesla(S.tesla, dt);
+    S.cam.x += (S.tesla.x - 34 - S.cam.x) * (1 - Math.exp(-dt * 4));
+    if (S.t > 3.5) S.carX -= 46 * dt;
+    if (rnd() < dt * 1.5) emit({ type: 'leaf', x: S.cam.x + rr(10, 110), y: 10, vx: rr(-10, -4), vy: rr(8, 14), life: 9, c: C.wl1, c2: C.wl0, ph: rr(0, 3), z: 2, upd: p => { p.vx += Math.sin(p.t * 2.5 + p.ph) * .5; if (p.y > 108) { p.vy = 0; p.vx = 0; } } });
+  },
+  draw(S) {
+    const cx = S.cam.x + S.ox, cy = S.cam.y + S.oy;
+    drawStreet(S, S.st);
+    drawTesla(S.tesla, cx, cy);
+    drawParts(1, cx, cy);
+    drawStreetLamps(S);
+    const carX = Math.round(S.carX - cx);
+    if (carX > -40 && carX < W + 10) {
+      for (let i = 0; i < 26; i++) for (let j = -i * .25; j <= i * .25; j++) addPx(carX - i - 1, 112 - cy + 2 + j, C.wl3, .08 * (1 - i / 26));
+      blit(PROP.car, carX, 108 - cy);
+    }
+    drawParts(2, cx, cy);
+    vignette(.8);
+  },
+});
+
+// ---- feeding the pigeons at the public library
+function spawnFlock(S, n) {
+  for (let i = 0; i < n; i++) {
+    const side = i % 3, sx = side === 0 ? rr(-10, 106) : side === 1 ? -12 : 108, sy = side === 0 ? -10 : rr(10, 60);
+    const p = newPigeon({ x: sx, y: sy, delay: 4 + i * .28 + rnd() * .3 });
+    p.state = 'wait';
+    const stop = S.tesla.tx;
+    p.gx = clamp(stop + (i & 1 ? rr(8, 42) : -rr(8, 38)), 6, 92); p.gy = rr(104, 117);
+    p.minX = 2; p.maxX = 94;
+    S.flock.push(p);
+  }
+}
+SCENES.push({
+  name: 'library', dur: 16.5, tin: 'fade', tinDur: .8, tout: 'cut',
+  init(S) {
+    S.lib = once('library', buildLibrary);
+    S.tesla = newTesla(-10, 108, { tx: 46, speed: 14 });
+    S.flock = [];
+    S.white = null;
+    spawnFlock(S, 13);
+    S.focus = [48, 90];
+  },
+  update(S, dt) {
+    const a = S.tesla, t = S.t;
+    updTesla(a, dt);
+    if (at(3.3)) { a.dir = 1; S.whistle = 0; caption('HE WOULD GIVE A LOW WHISTLE, AND THE PIGEONS CAME FROM ALL OVER.', 5.2); }
+    if (S.whistle != null) S.whistle += dt;
+    for (const p of S.flock) {
+      if (p.state === 'wait' && t > p.delay) flyTo(p, p.gx, p.gy);
+      if (p.state !== 'wait') updPigeon(p, dt);
+    }
+    for (const tt of [5.2, 6.8, 8.2]) if (at(tt)) { a.pose = 'scatter'; throwSeed(a.x + 9, a.y - 17, 1, 110); }
+    for (const tt of [5.7, 7.3, 8.7]) if (at(tt)) a.pose = 'stand';
+    if (at(9.4)) {
+      S.white = newPigeon({ x: 104, y: 20, white: true, speed: 26 });
+      const [hx, hy] = teslaHand(a);
+      flyTo(S.white, hx, hy, true);
+      a.pose = 'hold';
+    }
+    if (S.white) { updPigeon(S.white, dt); if (S.white.state === 'perch') { const [hx, hy] = teslaHand(a); S.white.x = hx; S.white.y = hy; S.white.dir = -1; } }
+    if (at(10.2)) caption('ONE WAS DIFFERENT: PURE WHITE, WITH LIGHT GRAY TIPS ON HER WINGS.', 5.8);
+  },
+  draw(S) {
+    const t = S.t, a = S.tesla;
+    drawLayer(S.lib, 0, 0, false);
+    drawLibraryLamps(t);
+    lampPool(40, 103); lampPool(86, 103);
+    drawParts(1, 0, 0);
+    const behind = S.flock.filter(p => p.state !== 'wait' && p.y < a.y);
+    const front = S.flock.filter(p => p.state !== 'wait' && p.y >= a.y);
+    drawFlock(behind, 0, 0);
+    drawTesla(a, 0, 0);
+    if (S.whistle != null && S.whistle < 2.4) {
+      const k = S.whistle;
+      drawText('♪', Math.round(a.x + 7 + k * 5), Math.round(a.y - 30 - k * 6), mix(C.nt1, C.cream, Math.min(1, 2.4 - k)));
+    }
+    drawFlock(front, 0, 0);
+    if (S.white) { glow(S.white.x, S.white.y - 4, 9, C.wp2, .22, 5, false); drawPigeon(S.white, 0, 0); }
+    drawParts(2, 0, 0);
+    vignette(.85);
+  },
+});
+
+// ---- close up: she perches on his hand
+function bokeh(t, lights) {
+  for (const [x, y, r, c, k, sp] of lights) glow(x + Math.sin(t * sp + x) * 3, y + Math.cos(t * sp * .8 + y) * 2, r, c, k, 6, false);
+}
+const HAND_BOKEH = [[14, 26, 16, C.wl2, .2, .3], [82, 14, 20, C.wl1, .18, .25], [62, 40, 11, C.wl3, .14, .4], [8, 64, 13, C.nt6, .16, .2],
+  [90, 64, 15, C.wl2, .12, .3], [40, 10, 9, C.nt7, .14, .35], [30, 104, 18, C.wl1, .1, .2]];
+SCENES.push({
+  name: 'hand', dur: 9.4, tin: 'cut', tout: 'fade', toutDur: 1,
+  init(S) {},
+  update(S, dt) {
+    if (at(1)) caption('SHE CAME WHENEVER HE CALLED. HE SAID HE LOVED HER, AND THAT SHE LOVED HIM.', 8);
+    if (rnd() < dt * 3) emit({ type: 'glow', x: rr(0, 96), y: rr(30, 110), vx: rr(-2, 2), vy: rr(-5, -1), life: rr(1.5, 3), c: C.wl3, s: .5, z: 0 });
+  },
+  draw(S) {
+    const t = S.t;
+    skyGrad([[0, C.nt1], [60, C.nt2], [120, C.nt3]], 0);
+    bokeh(t, HAND_BOKEH);
+    drawParts(0, 0, 0);
+    const bob = Math.round(Math.sin(t * 1.9) * .6), hx = -22, hy = 86 + bob;
+    const fingerTop = hy + 6, bx = hx + 58, by = fingerTop + 1 - WHITE_XL.h + 1;
+    const blinking = (t % 3.3) > 3.15;
+    glow(bx + 26, by + 18, 30, C.wp2, .1, 6, false);
+    blit(blinking ? WHITE_XL_BLINK : WHITE_XL, bx, by, true);
+    blit(HAND, hx, hy);
+    vignette(1);
+  },
+});
+
+SCENES.push(card('WHEN BIRDS WERE HURT OR SICK, HE CARRIED THEM HOME AND NURSED THEM IN HIS HOTEL ROOM.', 5.2));
+
+// ---- nursing her back to health
+SCENES.push({
+  name: 'nursing', dur: 14.5, tin: 'fade', tinDur: .8, tout: 'fade', toutDur: .9,
+  init(S) {
+    S.room = once('room', buildRoom);
+    S.tesla = newTesla(46, 102, { hat: false, pose: 'sit' });
+    S.bird = newPigeon({ x: 70, y: 79, white: true, state: 'perch', dir: -1 });
+    S.focus = [60, 70];
+  },
+  update(S, dt) {
+    const t = S.t, a = S.tesla, b = S.bird;
+    if (at(1)) caption('ONCE, WHEN SHE FELL ILL, HE STAYED BY HER SIDE FOR DAYS, UNTIL SHE WAS WELL.', 6.5);
+    a.pose = t < 10.5 ? (Math.floor(t * 1.5) % 5 === 0 ? 'sit2' : 'sit') : 'bareHold';
+    if (at(10.5)) { a.y = 102; a.x = 50; }
+    if (at(10.9)) { b.state = 'idle'; b.y = 79; b.st = 0; }
+    if (at(11.6)) flyTo(b, 73, WIN.y + WIN.h, true);
+    if (at(12.6)) flyTo(b, 110, 20, false);
+    if (b.state === 'fly' || b.state === 'idle') updPigeon(b, dt);
+    if (b.state === 'idle' && t > 11.6) b.state = 'perch';
+    updTesla(a, dt);
+  },
+  draw(S) {
+    const t = S.t, cyc = (t / 10.5) * 2;           // two days and nights pass in the window
+    const day = t < 10.5 ? Math.max(0, Math.sin((cyc % 1) * Math.PI * 2 - Math.PI / 2)) : 1;
+    const sky = mixSky(SKY_WIN_NIGHT, SKY_WIN_DAY, day);
+    drawRoom(S, { sky, starA: 1 - day, moon: day < .3, dark: .25 * (1 - day), lamp: 1 - day });
+    if (S.bird.state !== 'perch' || t > 11) drawPigeon(S.bird, 0, 0);
+    else {                                          // resting in the basket, feathers fluffed
+      blit(WHITE_PIGEON.stand, 65, 71, true);
+      if (Math.floor(t * .7) % 3 === 0) pset(67, 73, C.wp3);
+    }
+    if (t < 10.9) blit(PROP.basket, 62, 76);
+    drawTesla(S.tesla, 0, 0);
+    if (day > 0) brect(0, 0, W, H, C.dk7, .06 * day);
+    vignette(.9);
+  },
+});
+
+// ---- she came to his window, season after season
+const SEASONS = [
+  { sky: [hex('#39456b'), hex('#56628a'), hex('#7c86a8'), hex('#a8b0c8')], fx: 'snow' },
+  { sky: [hex('#2c3350'), hex('#3d4668'), hex('#56608a'), hex('#707aa0')], fx: 'rain' },
+  { sky: [hex('#6f8fc0'), hex('#8fb0d8'), hex('#c8d8ea'), hex('#f0e6d6')], fx: 'petals' },
+  { sky: [C.dk1, C.dk2, C.dk4, C.dk6], fx: 'leaves' },
+];
+SCENES.push({
+  name: 'seasons', dur: 11, tin: 'fade', tinDur: .8, tout: 'fade', toutDur: .9,
+  init(S) { S.room = once('room', buildRoom); S.bird = newPigeon({ x: 110, y: 20, white: true }); S.si = -1; S.tesla = newTesla(46, 102, { hat: false, pose: 'sit' }); },
+  update(S, dt) {
+    const t = S.t, si = Math.min(3, Math.floor(t / 2.75));
+    if (si !== S.si) { S.si = si; S.bird.x = 108; S.bird.y = 22; flyTo(S.bird, 66 + si * 5, WIN.y + WIN.h, true); S.leaveAt = t + 1.9; }
+    if (S.leaveAt && t > S.leaveAt && S.bird.state === 'perch') { flyTo(S.bird, 112, 24, false); }
+    updPigeon(S.bird, dt);
+    if (S.bird.state === 'perch') S.bird.dir = -1;
+    if (at(.8)) caption('AS LONG AS HE HAD HER, HE SAID, HIS LIFE HAD A PURPOSE.', 8.5);
+    const fx = SEASONS[si].fx;
+    if (rnd() < dt * (fx === 'rain' ? 60 : 18)) {
+      const x = WIN.x + rr(0, WIN.w), y = WIN.y - 2;
+      if (fx === 'snow') emit({ type: 'snow', x, y, vx: rr(-3, 3), vy: rr(6, 12), life: 6, z: 0, upd: p => { if (p.y > WIN.y + WIN.h - 1) p.dead = true; } });
+      if (fx === 'rain') emit({ type: 'rain', x, y, vx: -8, vy: 90, life: 2, z: 0, upd: p => { if (p.y > WIN.y + WIN.h - 1) p.dead = true; } });
+      if (fx === 'petals') emit({ type: 'snow', c: hex('#f6c8d8'), x, y, vx: rr(4, 10), vy: rr(5, 9), life: 6, z: 0, upd: p => { p.vx += Math.sin(p.t * 3) * .4; if (p.y > WIN.y + WIN.h - 1 || p.x > WIN.x + WIN.w) p.dead = true; } });
+      if (fx === 'leaves') emit({ type: 'snow', c: pick([C.wl1, C.dk4, C.wl2]), s: 2, x, y, vx: rr(-6, 4), vy: rr(6, 10), life: 6, z: 0, upd: p => { p.vx += Math.sin(p.t * 3) * .5; if (p.y > WIN.y + WIN.h - 1 || p.x < WIN.x) p.dead = true; } });
+    }
+    S.tesla.pose = Math.floor(t * 1.4) % 4 === 0 ? 'sit2' : 'sit';
+  },
+  draw(S) {
+    const se = SEASONS[S.si < 0 ? 0 : S.si];
+    drawRoom(S, { sky: se.sky, starA: 0, moon: false, weather: () => drawParts(0, 0, 0), lamp: .6, dark: .12 });
+    drawPigeon(S.bird, 0, 0);
+    drawTesla(S.tesla, 0, 0);
+    vignette(.9);
+  },
+});
+
+SCENES.push(card('THEN, ONE NIGHT...', 3.2));
+
+// ---- the night she came to him
+SCENES.push({
+  name: 'night', dur: 14, tin: 'fade', tinDur: 1, tout: 'cut',
+  init(S) {
+    S.room = once('room', buildRoom);
+    S.bird = newPigeon({ x: 108, y: 16, white: true, speed: 22 });
+    S.tesla = newTesla(38, 102, { hat: false, pose: 'bare', vis: false });
+    S.focus = [72, 76];
+  },
+  update(S, dt) {
+    const t = S.t, a = S.tesla, b = S.bird;
+    if (at(2.2)) flyTo(b, 74, WIN.y + WIN.h, true);
+    if (at(3.6)) flyTo(b, 71, 81, true);
+    if (at(3.2)) caption('SHE FLEW IN THROUGH THE OPEN WINDOW AND STOOD ON HIS DESK.', 5.4);
+    if (at(6.8)) { a.vis = true; a.x = 34; a.dir = 1; }
+    if (at(7.6)) a.tx = 58;
+    if (at(9.3)) caption('HE KNEW SHE HAD COME TO TELL HIM THAT SHE WAS DYING.', 4.6);
+    updPigeon(b, dt);
+    if (b.state === 'perch') b.dir = -1;
+    updTesla(a, dt);
+  },
+  draw(S) {
+    const t = S.t, a = S.tesla;
+    drawRoom(S, { sky: SKY_WIN_NIGHT, starA: 1, moon: true, dark: .45, moonShaft: 1 });
+    if (!a.vis) {                                    // lying awake in the dark
+      blit(PILLOW_HEAD, 6, 71);
+      rect(14, 76, 26, 5, C.ln1); rect(14, 76, 26, 1, C.ln2); rect(18, 75, 14, 1, C.ln1);
+    }
+    glow(S.bird.x, S.bird.y - 4, 9, C.wp2, .09, 6, false);
+    drawPigeon(S.bird, 0, 0);
+    drawTesla(a, 0, 0);
+    vignette(1.1);
+  },
+});
+
+// ---- close up: the light from her eyes
+SCENES.push({
+  name: 'light', dur: 9, tin: 'cut', tout: 'white', toutDur: 1.4,
+  init(S) {},
+  update(S, dt) {
+    if (S.t > 3) S.shake = Math.min(1.2, (S.t - 3) * .25);
+  },
+  draw(S) {
+    const t = S.t;
+    skyGrad([[0, C.nt0], [70, C.nt1], [120, C.nt2]], 0);
+    bokeh(t * .5, [[70, 22, 20, C.nt5, .16, .2], [20, 30, 14, C.nt4, .14, .25], [86, 60, 12, C.nt6, .1, .3]]);
+    // the desk's edge in the moonlight
+    rect(0, 90 + S.oy, W, 30, C.wd1); rect(0, 90 + S.oy, W, 2, C.wd3); rect(0, 92 + S.oy, W, 1, C.wd0);
+    const bx = 30 + S.ox, by = 91 - WHITE_XL.h + 1 + S.oy;
+    blit(WHITE_XL, bx, by, true);
+    const ex = bx + WHITE_XL.w - 1 - WHITE_XL_EYE[0], ey = by + WHITE_XL_EYE[1];
+    const k = prog(t, 1.2, 7.5);
+    if (k > 0) {
+      glow(ex, ey, 6 + 70 * k * k, C.white, .25 + .75 * k, 8, false);
+      const n = 14;
+      for (let i = 0; i < n; i++) {
+        const an = i / n * TAU + t * .15, len = 20 + 110 * k, wv = 1 + Math.floor(k * 3);
+        for (let o = -wv; o <= wv; o++) lineAdd(ex + Math.cos(an + Math.PI / 2) * o * .5, ey + Math.sin(an + Math.PI / 2) * o * .5, ex + Math.cos(an) * len, ey + Math.sin(an) * len, C.lt2, .12 + .3 * k);
+      }
+      rect(ex - 1, ey - 1, 3, 3, C.white);
+    }
+    if (k > .7) brect(0, 0, W, H, C.white, (k - .7) / .3 * .85);
+    vignette(1 - k);
+  },
+});
+
+SCENES.push(card('HE SAID A LIGHT CAME FROM HER EYES, BRIGHTER THAN ANY LAMP IN HIS LABORATORY.', 5.6, { light: true, tin: 'white', tout: 'white' }));
+
+// ---- dawn
+SCENES.push({
+  name: 'dawn', dur: 13.4, tin: 'white', tinDur: 1.4, tout: 'fade', toutDur: 1.2,
+  init(S) { S.room = once('room', buildRoom); S.tesla = newTesla(34, 102, { hat: false, pose: 'bowed' }); },
+  update(S, dt) {
+    const t = S.t;
+    if (at(1.6)) caption('WHEN SHE DIED, HE SAID, SOMETHING WENT OUT OF HIS LIFE.', 5.4);
+    if (at(7.6)) caption("HE FELT THAT HIS LIFE'S WORK WAS FINISHED.", 5.2);
+    if (at(10.5)) S.tesla.pose = 'sit';
+    if (rnd() < dt * 2) emit({ type: 'glow', x: rr(40, 90), y: rr(60, 100), vx: rr(-2, 1), vy: rr(-3, 1), life: rr(2, 4), c: C.dk6, s: .5, z: 1 });
+  },
+  draw(S) {
+    const t = S.t;
+    drawRoom(S, { sky: SKY_WIN_DAWN, starA: 0, moon: false, dark: .15 });
+    // soft dawn light through the window
+    for (let yy = WIN.y + WIN.h + 3; yy < H; yy++) {
+      const d = yy - (WIN.y + WIN.h);
+      for (let xx = Math.max(0, Math.floor(WIN.x - d * .9)); xx < Math.min(W, WIN.x + WIN.w - d * .5); xx++) addPx(xx, yy, C.dk5, .1);
+    }
+    glow(WIN.x + WIN.w / 2, WIN.y + WIN.h / 2, 40, C.dk5, .1, 8, false);
+    blit(PROP.feather, 70, 72);
+    drawTesla(S.tesla, 0, 0);
+    drawParts(1, 0, 0);
+    vignette(.9);
+  },
+});
+
+
+
+
+SCENES.push(card('IN HIS LAST YEARS, WHEN HE COULD NO LONGER GO OUT, HE PAID MESSENGERS TO FEED THE PIGEONS FOR HIM.', 6));
+
+// ---- the last years: snow, a messenger feeding the pigeons, his window high above
+const TOWER_TOP = -170, TESLA_WIN = [54, -128];     // his window sits on the facade's window grid
+function drawTower(S, cx, cy, windowLit) {
+  const x0 = 12, x1 = 108;
+  for (let y = 0; y < H; y++) {
+    const wy = y + cy;
+    if (wy < TOWER_TOP || wy > 100) continue;
+    const fx0 = Math.round(x0 - cx), fx1 = Math.round(x1 - cx);
+    rect(fx0, y, fx1 - fx0, 1, C.br1);
+    for (let px = x0; px < x1; px += 12) { const sx = Math.round(px - cx); rect(sx, y, 2, 1, C.br2); pset(sx + 2, y, C.br0); }
+  }
+  rect(Math.round(x0 - cx) - 2, TOWER_TOP - cy - 3, x1 - x0 + 4, 3, C.sn2);
+  for (let wy = TOWER_TOP + 10; wy < 70; wy += 16) for (let px = x0 + 4; px < x1 - 6; px += 12) {
+    const sx = Math.round(px - cx), sy = Math.round(wy - cy);
+    if (sy < -12 || sy > H) continue;
+    const mine = px === TESLA_WIN[0] - 2 && wy === TESLA_WIN[1];
+    const lit = mine ? windowLit > 0 : hash2(px, wy) < .18;
+    rect(sx - 1, sy - 1, 8, 11, C.br0);
+    rect(sx, sy, 6, 9, lit ? (mine ? mix(C.bd1, C.wl2, windowLit) : C.wl1) : C.bd1);
+    if (lit && !mine) rect(sx, sy, 6, 3, C.wl2);
+    rect(sx - 1, sy + 9, 8, 1, C.snow);                 // snow on the sill
+    if (mine && windowLit > 0) {
+      glow(sx + 3, sy + 4, 9, C.wl2, .2 * windowLit, 5, false);
+      disc(sx + 3, sy + 4, 1.8, C.tc0); rect(sx + 1, sy + 6, 5, 3, C.tc0); rect(sx + 2, sy + 2, 3, 1, C.gy1);
+    }
+  }
+  // the street below
+  const gy = 100 - cy;
+  if (gy < H) {
+    rect(0, gy, W, H - gy, C.pv1); rect(0, gy, W, 2, C.snow); rect(0, gy + 2, W, 1, C.ln2);
+    for (let x = ((-Math.round(cx)) % 7 + 7) % 7; x < W; x += 7) pset(x, gy + 4, C.ln1);
+  }
+}
+SCENES.push({
+  name: 'last years', dur: 15, tin: 'fade', tinDur: 1, tout: 'fade', toutDur: 1.4,
+  init(S) {
+    S.cam.y = 8;
+    S.boy = { x: 34, y: 102 };
+    S.flock = [];
+    for (let i = 0; i < 9; i++) {
+      const p = newPigeon({ x: rr(-10, 100), y: rr(-40, 10) });
+      p.state = 'wait'; p.delay = .6 + i * .35; p.gx = 26 + rr(-16, 40); p.gy = rr(104, 116); p.minX = 4; p.maxX = 92;
+      S.flock.push(p);
+    }
+    S.lit = 1;
+    S.focus = [48, 40];
+  },
+  update(S, dt) {
+    const t = S.t;
+    for (const p of S.flock) { if (p.state === 'wait' && t > p.delay) flyTo(p, p.gx, p.gy); if (p.state !== 'wait') updPigeon(p, dt); }
+    if (Math.floor(t * 1.2) !== Math.floor(S.pt * 1.2) && t < 5.5) throwSeed(S.boy.x + 6, 91, 1, 110, 7);
+    S.cam.y = lerp(8, TESLA_WIN[1] - 52, E.inOut(prog(t, 4.2, 10)));
+    if (at(10.6)) caption('HE DIED IN HIS HOTEL ROOM IN JANUARY 1943, AT THE AGE OF 86.', 4.3);
+    if (t > 12.4) S.lit = Math.max(0, S.lit - dt * .7);
+    if (rnd() < dt * 40) emit({ type: 'snow', x: rr(-10, 106), y: S.cam.y - 4, vx: rr(-4, 2), vy: rr(8, 16), life: 14, s: rnd() < .3 ? 2 : 1, z: 2, upd: p => { p.vx += Math.sin(p.t * 1.7 + p.x) * .15; } });
+  },
+  draw(S) {
+    const t = S.t, cx = S.cam.x, cy = S.cam.y;
+    skyGrad([[-260, C.nt1], [-120, C.nt2], [0, C.nt3], [100, C.nt4]], cy * .3);
+    drawTower(S, cx, cy, S.lit);
+    const lx = 72 - cx, ly = 102 - cy;
+    if (ly - 36 < H) { streetLamp(Math.round(lx), 102, cy); lampPool(lx, ly + 3); }
+    if (S.boy.y - cy - 21 < H) blit(PROP.boy, S.boy.x - cx - 5, S.boy.y - cy - 20);
+    drawParts(1, cx, cy);
+    drawFlock(S.flock.filter(p => p.state !== 'wait'), cx, cy);
+    drawParts(2, cx, cy);
+    vignette(.9);
+  },
+});
+
+// ---- the end
+SCENES.push({
+  name: 'end', dur: 0, tin: 'fade', tinDur: 1.6, tout: 'fade', toutDur: .8,
+  init(S) { S.cam.y = 0; announce('Nikola Tesla, 1856 to 1943. Tap to replay.'); },
+  update(S, dt) {},
+  draw(S) {
+    const t = S.t;
+    drawCity(S, { moon: [42, 40], sky2: () => { const k = (t - 1.5) % 9; if (k > 0 && k < 6) flyer(S, t - k, 6, 58, 46); } });
+    const a = prog(t, 1, 3);
+    if (a > 0) {
+      const c = mix(C.nt1, C.cream, a), d = mix(C.nt1, C.creamD, a);
+      const n1 = 'NIKOLA TESLA', n2 = '1856 - 1943';
+      drawText(n1, Math.round((W - textWidth(n1)) / 2), 14, c, C.ink);
+      rect(30, 22, 36, 1, d); pset(47, 23, d); pset(48, 23, d);
+      drawText(n2, Math.round((W - textWidth(n2)) / 2), 26, d, C.ink);
+    }
+    vignette(.9);
+    if (t > 4 && (Math.floor(t * 1.6) & 1)) { const h = 'TAP TO REPLAY'; drawText(h, Math.round((W - textWidth(h)) / 2), 111, C.txDim, C.ink); }
+  },
+});
+
+// ================================================================= boot
+function fit() {
+  const vw = window.innerWidth, vh = window.innerHeight, dpr = window.devicePixelRatio || 1;
+  const f = Math.min(vw / W, vh / H);
+  const fi = Math.floor(f * dpr) / dpr;           // whole device pixels per game pixel
+  // in portrait the canvas spans the full width (the page above and below continues its
+  // edge colours); otherwise prefer whole-pixel scaling when it costs little space
+  const portrait = vh / vw > H / W;
+  const s = fi > 0 && fi >= f * (portrait ? .99 : .86) ? fi : f;
+  canvas.style.width = W * s + 'px';
+  canvas.style.height = H * s + 'px';
+}
+window.addEventListener('resize', fit);
+fit();
+function advance() { if (TR.phase !== 'out') goTo(SI + 1); }
+window.addEventListener('pointerdown', e => { if (e.button > 0) return; advance(); });
+window.addEventListener('keydown', e => {
+  if (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); advance(); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); if (TR.phase !== 'out') goTo(Math.max(0, SI - 1)); }
+});
+let last = 0, acc = 0;
+const STEP = 1 / 60;
+function frame(ts) {
+  requestAnimationFrame(frame);
+  if (!last) last = ts;
+  let dt = (ts - last) / 1000;
+  last = ts;
+  if (dt > .1) dt = .1;
+  if (Math.abs(dt - STEP) < .002) dt = STEP;
+  acc += dt;
+  let n = 0;
+  while (acc >= STEP - 1e-6 && n < 6) { update(STEP); acc -= STEP; n++; }
+  if (n) render();
+}
+startScene(0);
+TR.phase = 'in'; TR.kind = 'fade'; TR.dur = 1; TR.t = 0;
+render();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
