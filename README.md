@@ -16,6 +16,12 @@ Small Three.js/WebXR sandbox for testing VR mechanics without touching a game pr
 
 The hand state objects are available at `window.playground.hands.states`, including handedness, controller/grip nodes and the current XR input source. The magic blast uses those hooks without changing the locomotion controls.
 
+## Clawd (playable character)
+
+On desktop you play as Clawd in third person: **WASD** moves, **mouse** looks (click to lock the pointer), **Space** jumps, **V** toggles first person. Clawd turns toward his movement and has a scuttle/arm-swing animation. In VR he tags along at your feet.
+
+The model is `public/models/clawd.glb` (about 400 triangles, one vertex-coloured material, named parts `Clawd_Body`, `Clawd_Arm_L/R`, `Clawd_Leg_0..3` plus `Head_Top`, `Hand_L/R`, `Cast_Point` sockets). Regenerate it with `pip install bpy && python3 tools/build_clawd.py`. Character logic is in `src/clawd.js`.
+
 ## Run locally
 
 ```bash

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import './style.css';
 import { createVRHands } from './hands.js';
 import { createMagicBlast } from './magic-blast.js';
+import { createClawd } from './clawd.js';
 
 const canvas = document.querySelector('#world');
 const enterVR = document.querySelector('#enter-vr');
@@ -34,8 +35,25 @@ rig.name = 'player-rig';
 rig.add(camera);
 scene.add(rig);
 
-camera.position.set(0, 1.68, 5.2);
+// Desktop plays Clawd in third person (V toggles first person); the rig sits at Clawd's feet.
+const CAMERA_DISTANCE = 2.7;
+const CAMERA_TARGET_Y = 0.75;
+const FIRST_PERSON_EYE = 1.68;
+let thirdPerson = true;
+rig.position.set(0, 0, 5.2);
 camera.rotation.order = 'YXZ';
+camera.rotation.x = -0.18;
+
+function updateDesktopCamera() {
+  if (thirdPerson) {
+    const pitch = camera.rotation.x;
+    camera.position.set(0, CAMERA_TARGET_Y - Math.sin(pitch) * CAMERA_DISTANCE,
+      Math.cos(pitch) * CAMERA_DISTANCE);
+  } else {
+    camera.position.set(0, FIRST_PERSON_EYE, 0);
+  }
+}
+updateDesktopCamera();
 
 const hands = createVRHands({
   renderer,
@@ -119,9 +137,11 @@ function makeTestZone() {
 }
 
 makeTestZone();
+const clawd = createClawd({ scene });
 const magic = createMagicBlast({ scene, renderer, camera, rig, hands,
   colliders: blastColliders, target: blastTarget });
 window.playground.magic = magic;
+window.playground.clawd = clawd;
 
 scene.add(new THREE.HemisphereLight(0xdde3e7, 0x3b3e41, 1.7));
 
@@ -129,6 +149,8 @@ const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
 keyLight.position.set(4, 8, 5);
 keyLight.castShadow = true;
 keyLight.shadow.mapSize.set(1024, 1024);
+keyLight.shadow.bias = -0.0004;
+keyLight.shadow.normalBias = 0.02;
 keyLight.shadow.camera.left = -10;
 keyLight.shadow.camera.right = 10;
 keyLight.shadow.camera.top = 10;
@@ -210,7 +232,9 @@ function readDesktopInput() {
 
 function updateMovement(dt) {
   const activeCamera = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
-  activeCamera.getWorldPosition(head);
+  // Desktop: the character (rig origin) is what collides with the room, not the orbiting camera.
+  if (renderer.xr.isPresenting) activeCamera.getWorldPosition(head);
+  else head.set(rig.position.x, 0, rig.position.z);
 
   const input = renderer.xr.isPresenting ? readXRInput() : readDesktopInput();
 
@@ -244,6 +268,14 @@ function updateMovement(dt) {
 }
 
 window.addEventListener('keydown', (event) => {
+  if (event.code === 'Space' && !renderer.xr.isPresenting) {
+    event.preventDefault();
+    clawd.jump();
+  }
+  if (event.code === 'KeyV' && !event.repeat) {
+    thirdPerson = !thirdPerson;
+    updateDesktopCamera();
+  }
   if (['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(event.code)) {
     event.preventDefault();
     keys.add(event.code);
@@ -316,10 +348,10 @@ renderer.xr.addEventListener('sessionstart', () => {
 });
 
 renderer.xr.addEventListener('sessionend', () => {
-  rig.position.set(0, 0, 0);
+  rig.position.set(0, 0, 5.2);
   rig.rotation.set(0, 0, 0);
-  camera.position.set(0, 1.68, 5.2);
-  camera.rotation.set(0, 0, 0);
+  camera.rotation.set(-0.18, 0, 0);
+  updateDesktopCamera();
   velocity.set(0, 0, 0);
   lastTime = 0;
 });
@@ -332,6 +364,19 @@ function frame(time, xrFrame) {
   if (renderer.xr.isPresenting) renderer.xr.updateCamera(camera);
 
   updateMovement(dt);
+  if (renderer.xr.isPresenting) {
+    clawd.root.visible = true;
+    // In VR Clawd tags along at the player's feet.
+    camera.getWorldPosition(head);
+    clawd.update(dt, { x: head.x + Math.sin(rig.rotation.y) * 0.5 - Math.cos(rig.rotation.y) * 0.4, y: rig.position.y,
+      z: head.z + Math.cos(rig.rotation.y) * 0.5 + Math.sin(rig.rotation.y) * 0.4 }, velocity);
+  } else {
+    updateDesktopCamera();
+    rig.position.y = 0;
+    const jumpY = clawd.update(dt, rig.position, velocity);
+    clawd.root.visible = thirdPerson;
+    rig.position.y = jumpY;
+  }
   rig.updateMatrixWorld(true);
   if (renderer.xr.isPresenting) renderer.xr.updateCamera(camera);
   magic.update(dt, xrFrame);
